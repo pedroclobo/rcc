@@ -1,0 +1,141 @@
+use clap::Parser;
+use rcc::{CodeGen, CodeGenError, Lexer, LexerError, ParserError};
+use std::{error::Error, fmt::Display, fs::File, path::PathBuf, process::Command};
+
+#[derive(clap::Parser, Debug)]
+#[command(author, version, about)]
+struct Args {
+    #[arg(value_name = "FILE")]
+    c_file: PathBuf,
+
+    /// Stop after lexing
+    #[arg(long, conflicts_with_all = ["parse", "codegen"])]
+    lex: bool,
+
+    /// Stop after parsing
+    #[arg(long, conflicts_with_all = ["lex", "codegen"])]
+    parse: bool,
+
+    /// Stop after codegen
+    #[arg(long, conflicts_with_all = ["lex", "parse"])]
+    codegen: bool,
+
+    /// Output file
+    #[arg(short = 'o', long = "output", value_name = "FILE")]
+    output: Option<PathBuf>,
+}
+
+fn main() {
+    let args = Args::parse();
+    if !args.c_file.is_file() {
+        eprintln!("error: input must be a file");
+        std::process::exit(1);
+    }
+
+    let prog = match std::fs::read_to_string(&args.c_file) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    let asm_path = args.c_file.with_extension("s");
+    let out_path = args
+        .output
+        .clone()
+        .unwrap_or_else(|| args.c_file.with_extension(""));
+
+    if let Err(e) = run(&args, &prog, &asm_path, &out_path) {
+        eprintln!("error: {e}");
+        std::process::exit(1);
+    }
+}
+
+fn run<'a>(
+    args: &Args,
+    prog: &'a str,
+    asm_path: &std::path::Path,
+    out_path: &std::path::Path,
+) -> Result<(), CompileError<'a>> {
+    if args.lex {
+        Lexer::new(prog)
+            .lex()?
+            .iter()
+            .for_each(|tok| print!("{}", tok));
+        println!();
+    } else if args.parse {
+        println!("{:?}", rcc::Parser::new(prog).parse()?);
+    } else if args.codegen {
+        let ast = rcc::Parser::new(prog).parse()?;
+        let mut codegen = CodeGen::new(std::io::stdout().lock());
+        codegen.visit(ast)?;
+    } else {
+        let ast = rcc::Parser::new(prog).parse()?;
+
+        let file = File::create(asm_path)?;
+        let mut codegen = CodeGen::new(file);
+        codegen.visit(ast)?;
+
+        let status = Command::new("clang")
+            .arg(asm_path)
+            .arg("-o")
+            .arg(out_path)
+            .status()?;
+
+        if !status.success() {
+            return Err(CompileError::Linker);
+        }
+
+        std::fs::remove_file(asm_path)?;
+    }
+
+    Ok(())
+}
+
+#[derive(Debug)]
+enum CompileError<'a> {
+    Io(std::io::Error),
+    Lexer(LexerError<'a>),
+    Parser(ParserError<'a>),
+    CodeGen(CodeGenError),
+    Linker,
+}
+
+impl<'a> From<LexerError<'a>> for CompileError<'a> {
+    fn from(e: LexerError<'a>) -> Self {
+        CompileError::Lexer(e)
+    }
+}
+
+impl<'a> From<ParserError<'a>> for CompileError<'a> {
+    fn from(e: ParserError<'a>) -> Self {
+        CompileError::Parser(e)
+    }
+}
+
+impl From<std::io::Error> for CompileError<'_> {
+    fn from(e: std::io::Error) -> Self {
+        CompileError::Io(e)
+    }
+}
+
+impl From<CodeGenError> for CompileError<'_> {
+    fn from(e: CodeGenError) -> Self {
+        CompileError::CodeGen(e)
+    }
+}
+
+impl Error for CompileError<'_> {}
+
+impl Display for CompileError<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CompileError::Io(e) => e.fmt(f),
+            CompileError::Lexer(e) => e.fmt(f),
+            CompileError::Parser(e) => e.fmt(f),
+            CompileError::CodeGen(e) => e.fmt(f),
+            CompileError::Linker => write!(f, "Error linking program"),
+        }
+    }
+}
