@@ -18,7 +18,7 @@ impl<'a> Display for Token<'a> {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum TokenKind {
     Identifier,
     LParen,
@@ -30,8 +30,13 @@ pub enum TokenKind {
     Return,
     Constant,
     Semicolon,
+    Plus,
+    Minus,
     Mul,
     Div,
+    Increment,
+    Decrement,
+    Tilde,
 }
 
 pub struct Lexer<'a> {
@@ -150,8 +155,25 @@ impl<'a> Iterator for Lexer<'a> {
             '{' => Ok(Token::new(TokenKind::LBrace, "{")),
             '}' => Ok(Token::new(TokenKind::RBrace, "}")),
             ';' => Ok(Token::new(TokenKind::Semicolon, ";")),
+            '+' => {
+                if let Some('+') = self.peek_char() {
+                    self.next_char();
+                    Ok(Token::new(TokenKind::Increment, "++"))
+                } else {
+                    Ok(Token::new(TokenKind::Plus, "+"))
+                }
+            }
+            '-' => {
+                if let Some('-') = self.peek_char() {
+                    self.next_char();
+                    Ok(Token::new(TokenKind::Decrement, "--"))
+                } else {
+                    Ok(Token::new(TokenKind::Minus, "-"))
+                }
+            }
             '*' => Ok(Token::new(TokenKind::Mul, "*")),
             '/' => Ok(Token::new(TokenKind::Div, "/")),
+            '~' => Ok(Token::new(TokenKind::Tilde, "~")),
 
             '0'..='9' => self
                 .consume_constant()
@@ -171,7 +193,7 @@ impl<'a> Iterator for Lexer<'a> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum LexerError<'a> {
     InvalidChar(char),
     InvalidConstant(&'a str),
@@ -256,6 +278,20 @@ mod tests {
                 tok(TokenKind::Constant, "2"),
                 tok(TokenKind::Semicolon, ";"),
                 tok(TokenKind::RBrace, "}"),
+            ]
+        );
+    }
+
+    #[test]
+    fn unary() {
+        assert_eq!(
+            lex("-- - ++ + ~").unwrap(),
+            vec![
+                tok(TokenKind::Decrement, "--"),
+                tok(TokenKind::Minus, "-"),
+                tok(TokenKind::Increment, "++"),
+                tok(TokenKind::Plus, "+"),
+                tok(TokenKind::Tilde, "~"),
             ]
         );
     }

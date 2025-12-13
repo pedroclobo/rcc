@@ -15,8 +15,15 @@ pub enum Statement {
 }
 
 #[derive(Debug, Eq, PartialEq)]
+pub enum UnaryOperator {
+    Tilde,
+    Minus,
+}
+
+#[derive(Debug, Eq, PartialEq)]
 pub enum Expression {
     Constant(i32),
+    Unary(UnaryOperator, Box<Expression>),
 }
 
 pub trait Visitor {

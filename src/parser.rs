@@ -1,7 +1,7 @@
 use std::{error::Error, fmt::Display, iter::Peekable, num::ParseIntError};
 
 use crate::{
-    LexerError, Token,
+    LexerError, Token, UnaryOperator,
     ast::{Expression, FunctionDefinition, Program, Statement},
     lexer::{Lexer, TokenKind},
 };
@@ -34,6 +34,15 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn expect_any(&mut self, kinds: &'a [TokenKind]) -> Result<Token<'a>, ParserError<'a>> {
+        match self.lexer.next() {
+            Some(Ok(tok)) if kinds.contains(&tok.kind) => Ok(tok),
+            Some(Ok(tok)) => Err(ParserError::ExpectedAny(kinds, tok.kind)),
+            Some(Err(e)) => Err(ParserError::LexerError(e)),
+            None => Err(ParserError::NoMoreTokens),
+        }
+    }
+
     fn parse_function_definition(&mut self) -> Result<FunctionDefinition<'a>, ParserError<'a>> {
         self.expect(TokenKind::Int)?;
 
@@ -60,9 +69,47 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_expression(&mut self) -> Result<Expression, ParserError<'a>> {
-        Ok(Expression::Constant(
-            self.expect(TokenKind::Constant)?.lexeme.parse()?,
-        ))
+        let tok = match self.lexer.peek() {
+            Some(Ok(tok)) => tok,
+            Some(Err(e)) => return Err(ParserError::LexerError(*e)),
+            None => return Err(ParserError::NoMoreTokens),
+        };
+
+        match tok.kind {
+            TokenKind::Constant => {
+                let constant = self.expect(TokenKind::Constant)?;
+                Ok(Expression::Constant(constant.lexeme.parse()?))
+            }
+            TokenKind::LParen => {
+                self.expect(TokenKind::LParen)?;
+                let expr = self.parse_expression()?;
+                self.expect(TokenKind::RParen)?;
+                Ok(expr)
+            }
+            TokenKind::Minus | TokenKind::Tilde => self.parse_unary_expression(),
+            _ => Err(ParserError::ExpectedAny(
+                &[
+                    TokenKind::Constant,
+                    TokenKind::LParen,
+                    TokenKind::Minus,
+                    TokenKind::Tilde,
+                ],
+                tok.kind,
+            )),
+        }
+    }
+
+    fn parse_unary_expression(&mut self) -> Result<Expression, ParserError<'a>> {
+        let tok = self.expect_any(&[TokenKind::Minus, TokenKind::Tilde])?;
+
+        let op = match tok.kind {
+            TokenKind::Minus => UnaryOperator::Minus,
+            TokenKind::Tilde => UnaryOperator::Tilde,
+            _ => return Err(ParserError::InvalidUnaryOperator(tok.kind)),
+        };
+
+        let expr = self.parse_expression()?;
+        Ok(Expression::Unary(op, Box::new(expr)))
     }
 }
 
@@ -70,8 +117,10 @@ impl<'a> Parser<'a> {
 pub enum ParserError<'a> {
     NoMoreTokens,
     Expected(TokenKind, TokenKind),
+    ExpectedAny(&'a [TokenKind], TokenKind),
     LexerError(LexerError<'a>),
     ParseIntError(ParseIntError),
+    InvalidUnaryOperator(TokenKind),
 }
 
 impl Display for ParserError<'_> {
@@ -83,6 +132,10 @@ impl Display for ParserError<'_> {
             }
             ParserError::LexerError(e) => e.fmt(f),
             ParserError::ParseIntError(e) => e.fmt(f),
+            ParserError::ExpectedAny(expected, got) => {
+                write!(f, "Expected any of {:?}, got {:?}", expected, got)
+            }
+            ParserError::InvalidUnaryOperator(op) => write!(f, "Invalid unary operator: {:?}", op),
         }
     }
 }
@@ -128,6 +181,57 @@ mod tests {
         assert_eq!(
             ast.functions[0].body,
             Statement::Return(Expression::Constant(2))
+        );
+    }
+
+    #[test]
+    fn return_minus_2() {
+        let mut parser = Parser::new("int main(void) { return -2; }");
+        let ast = parser.parse().unwrap();
+
+        assert_eq!(ast.functions.len(), 1);
+        assert_eq!(ast.functions[0].name, "main");
+        assert_eq!(
+            ast.functions[0].body,
+            Statement::Return(Expression::Unary(
+                UnaryOperator::Minus,
+                Box::new(Expression::Constant(2))
+            ))
+        );
+    }
+
+    #[test]
+    fn return_neg_2() {
+        let mut parser = Parser::new("int main(void) { return ~2; }");
+        let ast = parser.parse().unwrap();
+
+        assert_eq!(ast.functions.len(), 1);
+        assert_eq!(ast.functions[0].name, "main");
+        assert_eq!(
+            ast.functions[0].body,
+            Statement::Return(Expression::Unary(
+                UnaryOperator::Tilde,
+                Box::new(Expression::Constant(2))
+            ))
+        );
+    }
+
+    #[test]
+    fn return_neg_minus_2() {
+        let mut parser = Parser::new("int main(void) { return ~(-2); }");
+        let ast = parser.parse().unwrap();
+
+        assert_eq!(ast.functions.len(), 1);
+        assert_eq!(ast.functions[0].name, "main");
+        assert_eq!(
+            ast.functions[0].body,
+            Statement::Return(Expression::Unary(
+                UnaryOperator::Tilde,
+                Box::new(Expression::Unary(
+                    UnaryOperator::Minus,
+                    Box::new(Expression::Constant(2))
+                ))
+            ))
         );
     }
 }

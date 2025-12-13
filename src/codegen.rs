@@ -53,6 +53,7 @@ impl<W: Write> Visitor for CodeGen<W> {
     fn visit_expression(&mut self, expression: Expression) -> Result<(), CodeGenError> {
         match expression {
             Expression::Constant(constant) => write!(self.out, "{}", constant)?,
+            Expression::Unary(op, expr) => todo!(),
         };
         Ok(())
     }
