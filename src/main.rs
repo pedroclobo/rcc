@@ -1,5 +1,11 @@
 use clap::Parser;
-use rcc::{CodeGen, CodeGenError, Lexer, LexerError, ParserError};
+use rcc::{
+    ast::AstVisitor,
+    codegen::{CodeGen, CodeGenError},
+    lexer::{Lexer, LexerError},
+    parser::ParserError,
+    tacky::{TackyEmitter, TackyError},
+};
 use std::{error::Error, fmt::Display, fs::File, path::PathBuf, process::Command};
 
 #[derive(clap::Parser, Debug)]
@@ -9,15 +15,19 @@ struct Args {
     c_file: PathBuf,
 
     /// Stop after lexing
-    #[arg(long, conflicts_with_all = ["parse", "codegen"])]
+    #[arg(long, conflicts_with_all = ["parse", "tacky", "codegen"])]
     lex: bool,
 
     /// Stop after parsing
-    #[arg(long, conflicts_with_all = ["lex", "codegen"])]
+    #[arg(long, conflicts_with_all = ["lex", "tacky", "codegen"])]
     parse: bool,
 
+    /// Stop after TACKY emission
+    #[arg(long, conflicts_with_all = ["lex", "parse", "codegen"])]
+    tacky: bool,
+
     /// Stop after codegen
-    #[arg(long, conflicts_with_all = ["lex", "parse"])]
+    #[arg(long, conflicts_with_all = ["lex", "parse", "tacky"])]
     codegen: bool,
 
     /// Output file
@@ -65,13 +75,17 @@ fn run<'a>(
             .for_each(|tok| print!("{}", tok));
         println!();
     } else if args.parse {
-        println!("{:?}", rcc::Parser::new(prog).parse()?);
+        println!("{:?}", rcc::parser::Parser::new(prog).parse()?);
     } else if args.codegen {
-        let ast = rcc::Parser::new(prog).parse()?;
+        let ast = rcc::parser::Parser::new(prog).parse()?;
         let mut codegen = CodeGen::new(std::io::stdout().lock());
         codegen.visit(ast)?;
+    } else if args.tacky {
+        let ast = rcc::parser::Parser::new(prog).parse()?;
+        let mut generator = TackyEmitter::new();
+        generator.visit_program(ast)?;
     } else {
-        let ast = rcc::Parser::new(prog).parse()?;
+        let ast = rcc::parser::Parser::new(prog).parse()?;
 
         let file = File::create(asm_path)?;
         let mut codegen = CodeGen::new(file);
@@ -99,6 +113,7 @@ enum CompileError<'a> {
     Lexer(LexerError<'a>),
     Parser(ParserError<'a>),
     CodeGen(CodeGenError),
+    Tacky(TackyError),
     Linker,
 }
 
@@ -126,6 +141,12 @@ impl From<CodeGenError> for CompileError<'_> {
     }
 }
 
+impl From<TackyError> for CompileError<'_> {
+    fn from(e: TackyError) -> Self {
+        CompileError::Tacky(e)
+    }
+}
+
 impl Error for CompileError<'_> {}
 
 impl Display for CompileError<'_> {
@@ -135,6 +156,7 @@ impl Display for CompileError<'_> {
             CompileError::Lexer(e) => e.fmt(f),
             CompileError::Parser(e) => e.fmt(f),
             CompileError::CodeGen(e) => e.fmt(f),
+            CompileError::Tacky(e) => e.fmt(f),
             CompileError::Linker => write!(f, "Error linking program"),
         }
     }

@@ -1,9 +1,8 @@
 use std::{error::Error, fmt::Display, iter::Peekable, num::ParseIntError};
 
 use crate::{
-    LexerError, Token, UnaryOperator,
-    ast::{Expression, FunctionDefinition, Program, Statement},
-    lexer::{Lexer, TokenKind},
+    ast::{Expression, FunctionDefinition, Program, Statement, UnaryOperator},
+    lexer::{Lexer, LexerError, Token, TokenKind},
 };
 
 pub struct Parser<'a> {

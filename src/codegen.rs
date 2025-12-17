@@ -1,4 +1,4 @@
-use crate::ast::{Expression, FunctionDefinition, Program, Statement, Visitor};
+use crate::ast::{AstVisitor, Expression, FunctionDefinition, Program, Statement};
 use std::{error::Error, fmt::Display, io::Write};
 
 pub struct CodeGen<W: Write> {
@@ -16,7 +16,7 @@ impl<W: Write> CodeGen<W> {
     }
 }
 
-impl<W: Write> Visitor for CodeGen<W> {
+impl<W: Write> AstVisitor<'_> for CodeGen<W> {
     type Error = CodeGenError;
 
     fn visit_program(&mut self, program: Program) -> Result<(), CodeGenError> {
@@ -53,7 +53,7 @@ impl<W: Write> Visitor for CodeGen<W> {
     fn visit_expression(&mut self, expression: Expression) -> Result<(), CodeGenError> {
         match expression {
             Expression::Constant(constant) => write!(self.out, "{}", constant)?,
-            Expression::Unary(op, expr) => todo!(),
+            Expression::Unary(_op, _expr) => todo!(),
         };
         Ok(())
     }
