@@ -69,61 +69,51 @@ fn run<'a>(
     asm_path: &std::path::Path,
     out_path: &std::path::Path,
 ) -> Result<(), CompileError<'a>> {
+    let tokens = Lexer::new(prog).lex()?;
     if args.lex {
-        Lexer::new(prog)
-            .lex()?
-            .iter()
-            .for_each(|tok| print!("{}", tok));
+        tokens.iter().for_each(|tok| print!("{}", tok));
         println!();
-    } else if args.parse {
-        println!("{:?}", rcc::parser::Parser::new(prog).parse()?);
-    } else if args.tacky {
-        let ast = rcc::parser::Parser::new(prog).parse()?;
-        let mut tacky_emitter = TackyEmitter::new();
-        tacky_emitter.visit_program(ast)?;
-        let prog = tacky_emitter
-            .get_program()
-            .expect("There should be a program");
-        println!("{:?}", prog);
-    } else if args.codegen {
-        let ast = rcc::parser::Parser::new(prog).parse()?;
-        let mut tacky_emitter = TackyEmitter::new();
-        tacky_emitter.visit_program(ast)?;
-        let prog = tacky_emitter
-            .get_program()
-            .expect("There should be a program");
-        let mut emitter = X86Emitter::new();
-        emitter.visit_program(prog)?;
-        let prog = emitter.get_program().expect("There should be a program");
-        println!("{}", prog);
-    } else {
-        let ast = rcc::parser::Parser::new(prog).parse()?;
-
-        let mut tacky_emitter = TackyEmitter::new();
-        tacky_emitter.visit_program(ast)?;
-        let prog = tacky_emitter
-            .get_program()
-            .expect("There should be a program");
-
-        let mut emitter = X86Emitter::new();
-        emitter.visit_program(prog)?;
-        let prog = emitter.get_program().expect("There should be a program");
-
-        let mut file = File::create(asm_path)?;
-        writeln!(file, "{}", prog)?;
-
-        let status = Command::new("clang")
-            .arg(asm_path)
-            .arg("-o")
-            .arg(out_path)
-            .status()?;
-
-        if !status.success() {
-            return Err(CompileError::Linker);
-        }
-
-        std::fs::remove_file(asm_path)?;
+        return Ok(());
     }
+
+    let ast = rcc::parser::Parser::new(prog).parse()?;
+    if args.parse {
+        println!("{:?}", ast);
+        return Ok(());
+    }
+
+    let mut tacky_emitter = TackyEmitter::new();
+    tacky_emitter.visit_program(ast)?;
+    let prog = tacky_emitter
+        .get_program()
+        .expect("There should be a program");
+    if args.tacky {
+        println!("{:?}", prog);
+        return Ok(());
+    }
+
+    let mut emitter = X86Emitter::new();
+    emitter.visit_program(prog)?;
+    let prog = emitter.get_program().expect("There should be a program");
+    if args.codegen {
+        println!("{}", prog);
+        return Ok(());
+    }
+
+    let mut file = File::create(asm_path)?;
+    writeln!(file, "{}", prog)?;
+
+    let status = Command::new("clang")
+        .arg(asm_path)
+        .arg("-o")
+        .arg(out_path)
+        .status()?;
+
+    if !status.success() {
+        return Err(CompileError::Linker);
+    }
+
+    std::fs::remove_file(asm_path)?;
 
     Ok(())
 }
