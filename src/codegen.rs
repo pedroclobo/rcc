@@ -153,12 +153,10 @@ impl std::fmt::Display for BinaryOperator {
     }
 }
 
-// TODO: make a register enum to avoid storing Strings
-// <Reg> ::= AX | DX | R10 | R11
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Operand {
     Imm(i32),
-    Reg(String),
+    Reg(Register),
     PseudoReg(String),
     Stack(i32),
 }
@@ -185,6 +183,29 @@ impl std::fmt::Display for Operand {
                     write!(f, "dword ptr [rsp + {}]", offset)
                 }
             }
+        }
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+pub enum Register {
+    Eax,
+    Edx,
+    Rsp,
+    Rbp,
+    R10d,
+    R11d,
+}
+
+impl std::fmt::Display for Register {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Register::Eax => write!(f, "eax"),
+            Register::Edx => write!(f, "edx"),
+            Register::Rsp => write!(f, "rsp"),
+            Register::Rbp => write!(f, "rbp"),
+            Register::R10d => write!(f, "r10d"),
+            Register::R11d => write!(f, "r11d"),
         }
     }
 }
@@ -266,10 +287,8 @@ impl<'a> TackyVisitor<'a> for X86Emitter<'a> {
     ) -> Result<(), Self::Error> {
         match statement {
             tacky::Instruction::Return(value) => {
-                self.instructions.push(Instruction::Mov(
-                    value.into(),
-                    Operand::Reg("eax".to_string()),
-                ));
+                self.instructions
+                    .push(Instruction::Mov(value.into(), Operand::Reg(Register::Eax)));
                 self.instructions.push(Instruction::Ret);
             }
             tacky::Instruction::Unary(op, src, dst) => {
@@ -290,24 +309,17 @@ impl<'a> TackyVisitor<'a> for X86Emitter<'a> {
                         (*dst).into(),
                     ));
                 }
-                // TODO: implement copy and clone for op
                 tacky::BinaryOperator::Div | tacky::BinaryOperator::Mod => {
-                    self.instructions.push(Instruction::Mov(
-                        (*lhs).into(),
-                        Operand::Reg("eax".to_string()),
-                    ));
+                    self.instructions
+                        .push(Instruction::Mov((*lhs).into(), Operand::Reg(Register::Eax)));
                     self.instructions.push(Instruction::Cdq);
                     self.instructions.push(Instruction::Idiv((*rhs).into()));
                     if matches!(op, tacky::BinaryOperator::Div) {
-                        self.instructions.push(Instruction::Mov(
-                            Operand::Reg("eax".to_string()),
-                            (*dst).into(),
-                        ));
+                        self.instructions
+                            .push(Instruction::Mov(Operand::Reg(Register::Eax), (*dst).into()));
                     } else {
-                        self.instructions.push(Instruction::Mov(
-                            Operand::Reg("edx".to_string()),
-                            (*dst).into(),
-                        ));
+                        self.instructions
+                            .push(Instruction::Mov(Operand::Reg(Register::Edx), (*dst).into()));
                     }
                 }
             },
@@ -423,15 +435,15 @@ impl InstructionFixer {
                 .get_mut(function.name)
                 .expect("Function not found");
 
-            instructions.push(Instruction::Push(Operand::Reg("rbp".to_string())));
+            instructions.push(Instruction::Push(Operand::Reg(Register::Rbp)));
             instructions.push(Instruction::Mov(
-                Operand::Reg("rsp".to_string()),
-                Operand::Reg("rbp".to_string()),
+                Operand::Reg(Register::Rsp),
+                Operand::Reg(Register::Rbp),
             ));
             instructions.push(Instruction::Binary(
                 BinaryOperator::Sub,
                 Operand::Imm(offset),
-                Operand::Reg("rsp".to_string()),
+                Operand::Reg(Register::Rsp),
             ));
 
             for instruction in &function.body {
@@ -439,10 +451,10 @@ impl InstructionFixer {
                     Instruction::Mov(Operand::Stack(src_offset), Operand::Stack(dst_offset)) => {
                         instructions.push(Instruction::Mov(
                             Operand::Stack(*src_offset),
-                            Operand::Reg("r10d".to_string()),
+                            Operand::Reg(Register::R10d),
                         ));
                         instructions.push(Instruction::Mov(
-                            Operand::Reg("r10d".to_string()),
+                            Operand::Reg(Register::R10d),
                             Operand::Stack(*dst_offset),
                         ));
                     }
@@ -454,35 +466,35 @@ impl InstructionFixer {
                     ) => {
                         instructions.push(Instruction::Mov(
                             Operand::Stack(*lhs_offset),
-                            Operand::Reg("r10d".to_string()),
+                            Operand::Reg(Register::R10d),
                         ));
                         instructions.push(Instruction::Binary(
                             *op,
-                            Operand::Reg("r10d".to_string()),
+                            Operand::Reg(Register::R10d),
                             Operand::Stack(*rhs_offset),
                         ));
                     }
                     Instruction::Binary(BinaryOperator::Mul, lhs, Operand::Stack(rhs_offset)) => {
                         instructions.push(Instruction::Mov(
                             Operand::Stack(*rhs_offset),
-                            Operand::Reg("r11d".to_string()),
+                            Operand::Reg(Register::R11d),
                         ));
                         instructions.push(Instruction::Binary(
                             BinaryOperator::Mul,
                             lhs.clone(),
-                            Operand::Reg("r11d".to_string()),
+                            Operand::Reg(Register::R11d),
                         ));
                         instructions.push(Instruction::Mov(
-                            Operand::Reg("r11d".to_string()),
+                            Operand::Reg(Register::R11d),
                             Operand::Stack(*rhs_offset),
                         ));
                     }
                     Instruction::Idiv(Operand::Imm(n)) => {
                         instructions.push(Instruction::Mov(
                             Operand::Imm(*n),
-                            Operand::Reg("r10d".to_string()),
+                            Operand::Reg(Register::R10d),
                         ));
-                        instructions.push(Instruction::Idiv(Operand::Reg("r10d".to_string())));
+                        instructions.push(Instruction::Idiv(Operand::Reg(Register::R10d)));
                     }
                     _ => {
                         instructions.push(instruction.clone());
@@ -490,10 +502,10 @@ impl InstructionFixer {
                 }
             }
             instructions.push(Instruction::Mov(
-                Operand::Reg("rbp".to_string()),
-                Operand::Reg("rsp".to_string()),
+                Operand::Reg(Register::Rbp),
+                Operand::Reg(Register::Rsp),
             ));
-            instructions.push(Instruction::Pop(Operand::Reg("rbp".to_string())));
+            instructions.push(Instruction::Pop(Operand::Reg(Register::Rbp)));
             instructions.push(Instruction::Ret);
         }
     }
