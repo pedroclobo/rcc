@@ -1,11 +1,12 @@
 use clap::Parser;
 use rcc::{
     ast::AstVisitor,
-    codegen::{CodeGen, CodeGenError},
+    codegen::{X86Emitter, X86EmitterError},
     lexer::{Lexer, LexerError},
     parser::ParserError,
-    tacky::{TackyEmitter, TackyError},
+    tacky::{TackyEmitter, TackyError, TackyVisitor},
 };
+use std::io::Write;
 use std::{error::Error, fmt::Display, fs::File, path::PathBuf, process::Command};
 
 #[derive(clap::Parser, Debug)]
@@ -76,20 +77,40 @@ fn run<'a>(
         println!();
     } else if args.parse {
         println!("{:?}", rcc::parser::Parser::new(prog).parse()?);
-    } else if args.codegen {
-        let ast = rcc::parser::Parser::new(prog).parse()?;
-        let mut codegen = CodeGen::new(std::io::stdout().lock());
-        codegen.visit(ast)?;
     } else if args.tacky {
         let ast = rcc::parser::Parser::new(prog).parse()?;
-        let mut generator = TackyEmitter::new();
-        generator.visit_program(ast)?;
+        let mut tacky_emitter = TackyEmitter::new();
+        tacky_emitter.visit_program(ast)?;
+        let prog = tacky_emitter
+            .get_program()
+            .expect("There should be a program");
+        println!("{:?}", prog);
+    } else if args.codegen {
+        let ast = rcc::parser::Parser::new(prog).parse()?;
+        let mut tacky_emitter = TackyEmitter::new();
+        tacky_emitter.visit_program(ast)?;
+        let prog = tacky_emitter
+            .get_program()
+            .expect("There should be a program");
+        let mut emitter = X86Emitter::new();
+        emitter.visit_program(prog)?;
+        let prog = emitter.get_program().expect("There should be a program");
+        println!("{}", prog);
     } else {
         let ast = rcc::parser::Parser::new(prog).parse()?;
 
-        let file = File::create(asm_path)?;
-        let mut codegen = CodeGen::new(file);
-        codegen.visit(ast)?;
+        let mut tacky_emitter = TackyEmitter::new();
+        tacky_emitter.visit_program(ast)?;
+        let prog = tacky_emitter
+            .get_program()
+            .expect("There should be a program");
+
+        let mut emitter = X86Emitter::new();
+        emitter.visit_program(prog)?;
+        let prog = emitter.get_program().expect("There should be a program");
+
+        let mut file = File::create(asm_path)?;
+        writeln!(file, "{}", prog)?;
 
         let status = Command::new("clang")
             .arg(asm_path)
@@ -112,7 +133,7 @@ enum CompileError<'a> {
     Io(std::io::Error),
     Lexer(LexerError<'a>),
     Parser(ParserError<'a>),
-    CodeGen(CodeGenError),
+    CodeGen(X86EmitterError),
     Tacky(TackyError),
     Linker,
 }
@@ -135,8 +156,8 @@ impl From<std::io::Error> for CompileError<'_> {
     }
 }
 
-impl From<CodeGenError> for CompileError<'_> {
-    fn from(e: CodeGenError) -> Self {
+impl From<X86EmitterError> for CompileError<'_> {
+    fn from(e: X86EmitterError) -> Self {
         CompileError::CodeGen(e)
     }
 }

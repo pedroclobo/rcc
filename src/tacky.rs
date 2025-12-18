@@ -51,6 +51,12 @@ pub struct TackyEmitter<'a> {
     counter: usize,
 }
 
+impl Default for TackyEmitter<'_> {
+    fn default() -> Self {
+        TackyEmitter::new()
+    }
+}
+
 impl TackyEmitter<'_> {
     pub fn new() -> Self {
         TackyEmitter {
@@ -65,11 +71,7 @@ impl TackyEmitter<'_> {
     }
 
     pub fn get_program(&mut self) -> Option<Program<'_>> {
-        if let Some(prog) = self.program.take() {
-            Some(prog)
-        } else {
-            None
-        }
+        self.program.take()
     }
 
     fn make_tmp(&mut self) -> Value {
@@ -177,6 +179,18 @@ impl fmt::Display for TackyError {
             }
         }
     }
+}
+
+pub trait TackyVisitor<'a> {
+    type Error;
+
+    fn visit_program(&mut self, program: Program<'a>) -> Result<(), Self::Error>;
+    fn visit_function_definition(
+        &mut self,
+        function_definition: FunctionDefinition<'a>,
+    ) -> Result<(), Self::Error>;
+    fn visit_instruction(&mut self, statement: Instruction) -> Result<(), Self::Error>;
+    fn visit_value(&mut self, value: Value) -> Result<(), Self::Error>;
 }
 
 #[cfg(test)]
