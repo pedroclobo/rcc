@@ -161,6 +161,7 @@ impl<'a> AstVisitor<'a> for TackyEmitter<'a> {
 
                 self.push_value(dst);
             }
+            Expression::Binary(_op, _left, _right) => todo!(),
         }
         Ok(())
     }

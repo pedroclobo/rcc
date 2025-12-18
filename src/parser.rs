@@ -1,9 +1,28 @@
 use std::{error::Error, fmt::Display, iter::Peekable, num::ParseIntError};
 
 use crate::{
-    ast::{Expression, FunctionDefinition, Program, Statement, UnaryOperator},
+    ast::{BinaryOperator, Expression, FunctionDefinition, Program, Statement, UnaryOperator},
     lexer::{Lexer, LexerError, Token, TokenKind},
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Precedence {
+    None,
+    Low,
+    High,
+    Highest,
+}
+
+impl Precedence {
+    fn increment(self) -> Self {
+        match self {
+            Precedence::None => Precedence::Low,
+            Precedence::Low => Precedence::High,
+            Precedence::High => Precedence::Highest,
+            Precedence::Highest => Precedence::Highest,
+        }
+    }
+}
 
 pub struct Parser<'a> {
     lexer: Peekable<Lexer<'a>>,
@@ -42,6 +61,7 @@ impl<'a> Parser<'a> {
         }
     }
 
+    // <function> ::= "int" <identifier> "(" "void" ")" "{" <statement> "}"
     fn parse_function_definition(&mut self) -> Result<FunctionDefinition<'a>, ParserError<'a>> {
         self.expect(TokenKind::Int)?;
 
@@ -58,16 +78,61 @@ impl<'a> Parser<'a> {
         Ok(FunctionDefinition { name, body })
     }
 
+    // <statement> ::= "return" <exp> ";"
     fn parse_statement(&mut self) -> Result<Statement, ParserError<'a>> {
         self.expect(TokenKind::Return)?;
-        let expr = self.parse_expression()?;
+        let expr = self.parse_expression(Precedence::None)?;
 
         self.expect(TokenKind::Semicolon)?;
 
         Ok(Statement::Return(expr))
     }
 
-    fn parse_expression(&mut self) -> Result<Expression, ParserError<'a>> {
+    fn precedence(token: &Token) -> Precedence {
+        match token.kind {
+            TokenKind::Plus | TokenKind::Minus => Precedence::Low,
+            TokenKind::Mul | TokenKind::Div | TokenKind::Mod => Precedence::High,
+            _ => Precedence::Low,
+        }
+    }
+
+    // <exp> ::= <factor> | <binexp>
+    // <binexp> ::= <factor> ("+" | "-" | "*" | "/" | "%") <factor>
+    fn parse_expression(&mut self, precedence: Precedence) -> Result<Expression, ParserError<'a>> {
+        let mut lhs = self.parse_factor()?;
+        while let Some(Ok(token)) = self.lexer.peek()
+            && Self::precedence(token) >= precedence
+        {
+            match token.kind {
+                TokenKind::Plus
+                | TokenKind::Minus
+                | TokenKind::Mul
+                | TokenKind::Div
+                | TokenKind::Mod => {
+                    let op = match token.kind {
+                        TokenKind::Plus => BinaryOperator::Add,
+                        TokenKind::Minus => BinaryOperator::Sub,
+                        TokenKind::Mul => BinaryOperator::Mul,
+                        TokenKind::Div => BinaryOperator::Div,
+                        TokenKind::Mod => BinaryOperator::Mod,
+                        _ => return Err(ParserError::InvalidUnaryOperator(token.kind)),
+                    };
+                    let precedence = Self::precedence(token);
+                    self.lexer.next();
+
+                    let rhs = self.parse_expression(precedence.increment())?;
+                    lhs = Expression::Binary(op, Box::new(lhs), Box::new(rhs));
+                }
+                _ => {
+                    break;
+                }
+            }
+        }
+        Ok(lhs)
+    }
+
+    // <factor> ::= constant | "(" <exp> ")" | <unexp>
+    fn parse_factor(&mut self) -> Result<Expression, ParserError<'a>> {
         let tok = match self.lexer.peek() {
             Some(Ok(tok)) => tok,
             Some(Err(e)) => return Err(ParserError::LexerError(*e)),
@@ -81,7 +146,7 @@ impl<'a> Parser<'a> {
             }
             TokenKind::LParen => {
                 self.expect(TokenKind::LParen)?;
-                let expr = self.parse_expression()?;
+                let expr = self.parse_expression(Precedence::None)?;
                 self.expect(TokenKind::RParen)?;
                 Ok(expr)
             }
@@ -98,6 +163,8 @@ impl<'a> Parser<'a> {
         }
     }
 
+    // <unexp> ::= <unop> <factor>
+    // <unop>  ::= "-" | "~"
     fn parse_unary_expression(&mut self) -> Result<Expression, ParserError<'a>> {
         let tok = self.expect_any(&[TokenKind::Minus, TokenKind::Tilde])?;
 
@@ -107,8 +174,8 @@ impl<'a> Parser<'a> {
             _ => return Err(ParserError::InvalidUnaryOperator(tok.kind)),
         };
 
-        let expr = self.parse_expression()?;
-        Ok(Expression::Unary(op, Box::new(expr)))
+        let factor = self.parse_factor()?;
+        Ok(Expression::Unary(op, Box::new(factor)))
     }
 }
 
@@ -120,6 +187,7 @@ pub enum ParserError<'a> {
     LexerError(LexerError<'a>),
     ParseIntError(ParseIntError),
     InvalidUnaryOperator(TokenKind),
+    InvalidBinaryOperator(TokenKind),
 }
 
 impl Display for ParserError<'_> {
@@ -135,6 +203,9 @@ impl Display for ParserError<'_> {
                 write!(f, "Expected any of {:?}, got {:?}", expected, got)
             }
             ParserError::InvalidUnaryOperator(op) => write!(f, "Invalid unary operator: {:?}", op),
+            ParserError::InvalidBinaryOperator(op) => {
+                write!(f, "Invalid binary operator: {:?}", op)
+            }
         }
     }
 }
@@ -155,6 +226,8 @@ impl<'a> From<ParseIntError> for ParserError<'a> {
 
 #[cfg(test)]
 mod tests {
+    use crate::ast::BinaryOperator;
+
     use super::*;
 
     #[test]
@@ -231,6 +304,44 @@ mod tests {
                     Box::new(Expression::Constant(2))
                 ))
             ))
+        );
+    }
+
+    #[test]
+    fn left_associativity() {
+        let mut parser = Parser::new("1 + 2 - 3");
+        let expr = parser.parse_expression(Precedence::None).unwrap();
+
+        assert_eq!(
+            expr,
+            Expression::Binary(
+                BinaryOperator::Sub,
+                Box::new(Expression::Binary(
+                    BinaryOperator::Add,
+                    Box::new(Expression::Constant(1)),
+                    Box::new(Expression::Constant(2))
+                )),
+                Box::new(Expression::Constant(3))
+            )
+        );
+    }
+
+    #[test]
+    fn precedence() {
+        let mut parser = Parser::new("1 + 2 * 3");
+        let expr = parser.parse_expression(Precedence::None).unwrap();
+
+        assert_eq!(
+            expr,
+            Expression::Binary(
+                BinaryOperator::Add,
+                Box::new(Expression::Constant(1)),
+                Box::new(Expression::Binary(
+                    BinaryOperator::Mul,
+                    Box::new(Expression::Constant(2)),
+                    Box::new(Expression::Constant(3))
+                )),
+            )
         );
     }
 }

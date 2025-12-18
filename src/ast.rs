@@ -21,9 +21,19 @@ pub enum UnaryOperator {
 }
 
 #[derive(Debug, Eq, PartialEq)]
+pub enum BinaryOperator {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+}
+
+#[derive(Debug, Eq, PartialEq)]
 pub enum Expression {
     Constant(i32),
     Unary(UnaryOperator, Box<Expression>),
+    Binary(BinaryOperator, Box<Expression>, Box<Expression>),
 }
 
 pub trait AstVisitor<'a> {

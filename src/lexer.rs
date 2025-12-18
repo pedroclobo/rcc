@@ -34,6 +34,7 @@ pub enum TokenKind {
     Minus,
     Mul,
     Div,
+    Mod,
     Increment,
     Decrement,
     Tilde,
@@ -173,6 +174,7 @@ impl<'a> Iterator for Lexer<'a> {
             }
             '*' => Ok(Token::new(TokenKind::Mul, "*")),
             '/' => Ok(Token::new(TokenKind::Div, "/")),
+            '%' => Ok(Token::new(TokenKind::Mod, "%")),
             '~' => Ok(Token::new(TokenKind::Tilde, "~")),
 
             '0'..='9' => self
