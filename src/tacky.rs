@@ -8,10 +8,29 @@ pub struct Program<'a> {
     pub functions: Vec<FunctionDefinition<'a>>,
 }
 
+impl std::fmt::Display for Program<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for function in &self.functions {
+            write!(f, "{}", function)?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
 pub struct FunctionDefinition<'a> {
     pub name: &'a str,
     pub body: Vec<Instruction>,
+}
+
+impl std::fmt::Display for FunctionDefinition<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "{}:", self.name)?;
+        for instruction in &self.body {
+            writeln!(f, "\t{}", instruction)?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -21,10 +40,31 @@ pub enum Instruction {
     Binary(BinaryOperator, Box<Value>, Box<Value>, Box<Value>),
 }
 
+impl std::fmt::Display for Instruction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Instruction::Return(val) => write!(f, "return {}", val),
+            Instruction::Unary(op, src, dst) => write!(f, "{} {} = {}", op, src, dst),
+            Instruction::Binary(op, lhs, rhs, dst) => {
+                write!(f, "{} = {} {} {}", dst, op, lhs, rhs)
+            }
+        }
+    }
+}
+
 #[derive(Debug, Eq, PartialEq)]
 pub enum UnaryOperator {
     Tilde,
     Minus,
+}
+
+impl std::fmt::Display for UnaryOperator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UnaryOperator::Tilde => write!(f, "not"),
+            UnaryOperator::Minus => write!(f, "neg"),
+        }
+    }
 }
 
 impl From<ast::UnaryOperator> for UnaryOperator {
@@ -45,6 +85,18 @@ pub enum BinaryOperator {
     Mod,
 }
 
+impl std::fmt::Display for BinaryOperator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BinaryOperator::Add => write!(f, "add"),
+            BinaryOperator::Sub => write!(f, "sub"),
+            BinaryOperator::Mul => write!(f, "mul"),
+            BinaryOperator::Div => write!(f, "div"),
+            BinaryOperator::Mod => write!(f, "mod"),
+        }
+    }
+}
+
 impl From<ast::BinaryOperator> for BinaryOperator {
     fn from(op: ast::BinaryOperator) -> Self {
         match op {
@@ -61,6 +113,15 @@ impl From<ast::BinaryOperator> for BinaryOperator {
 pub enum Value {
     Constant(i32),
     Var(String),
+}
+
+impl std::fmt::Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::Constant(val) => write!(f, "{}", val),
+            Value::Var(name) => write!(f, "%{}", name),
+        }
+    }
 }
 
 pub struct TackyEmitter<'a> {

@@ -88,7 +88,7 @@ fn run<'a>(
         .get_program()
         .expect("There should be a program");
     if args.tacky {
-        println!("{:?}", prog);
+        println!("{}", prog);
         return Ok(());
     }
 
