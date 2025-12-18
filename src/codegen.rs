@@ -50,6 +50,8 @@ pub enum Instruction {
     Binary(BinaryOperator, Operand, Operand),
     Push(Operand),
     Pop(Operand),
+    Cdq,
+    Idiv(Operand),
     Ret,
 }
 
@@ -62,6 +64,8 @@ impl Instruction {
             Instruction::Push(arg) => vec![arg],
             Instruction::Pop(arg) => vec![arg],
             Instruction::Ret => vec![],
+            Instruction::Cdq => vec![],
+            Instruction::Idiv(op) => vec![op],
         }
         .into_iter()
     }
@@ -74,6 +78,8 @@ impl Instruction {
             Instruction::Push(arg) => vec![arg],
             Instruction::Pop(arg) => vec![arg],
             Instruction::Ret => vec![],
+            Instruction::Cdq => vec![],
+            Instruction::Idiv(op) => vec![op],
         }
         .into_iter()
     }
@@ -88,6 +94,8 @@ impl std::fmt::Display for Instruction {
             Instruction::Push(arg) => write!(f, "push\t{}", arg),
             Instruction::Pop(arg) => write!(f, "pop\t{}", arg),
             Instruction::Ret => write!(f, "ret"),
+            Instruction::Cdq => write!(f, "cdq"),
+            Instruction::Idiv(op) => write!(f, "idiv\t{}", op),
         }
     }
 }
@@ -116,19 +124,37 @@ impl std::fmt::Display for UnaryOperator {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum BinaryOperator {
+    Add,
     Sub,
+    Mul,
+}
+
+impl From<tacky::BinaryOperator> for BinaryOperator {
+    fn from(op: tacky::BinaryOperator) -> Self {
+        match op {
+            tacky::BinaryOperator::Add => BinaryOperator::Add,
+            tacky::BinaryOperator::Sub => BinaryOperator::Sub,
+            tacky::BinaryOperator::Mul => BinaryOperator::Mul,
+            tacky::BinaryOperator::Div => panic!("div/mod should use `idiv`"),
+            tacky::BinaryOperator::Mod => panic!("div/mod should use `idiv`"),
+        }
+    }
 }
 
 impl std::fmt::Display for BinaryOperator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            BinaryOperator::Add => write!(f, "add"),
             BinaryOperator::Sub => write!(f, "sub"),
+            BinaryOperator::Mul => write!(f, "imul"),
         }
     }
 }
 
+// TODO: make a register enum to avoid storing Strings
+// <Reg> ::= AX | DX | R10 | R11
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Operand {
     Imm(i32),
@@ -252,7 +278,39 @@ impl<'a> TackyVisitor<'a> for X86Emitter<'a> {
                 self.instructions
                     .push(Instruction::Unary(op.into(), (*dst).into()));
             }
-            tacky::Instruction::Binary(_op, _lhs, _rhs, _dst) => todo!(),
+            tacky::Instruction::Binary(op, lhs, rhs, dst) => match op {
+                tacky::BinaryOperator::Add
+                | tacky::BinaryOperator::Sub
+                | tacky::BinaryOperator::Mul => {
+                    self.instructions
+                        .push(Instruction::Mov((*lhs).into(), (*dst.clone()).into()));
+                    self.instructions.push(Instruction::Binary(
+                        op.into(),
+                        (*rhs).into(),
+                        (*dst).into(),
+                    ));
+                }
+                // TODO: implement copy and clone for op
+                tacky::BinaryOperator::Div | tacky::BinaryOperator::Mod => {
+                    self.instructions.push(Instruction::Mov(
+                        (*lhs).into(),
+                        Operand::Reg("eax".to_string()),
+                    ));
+                    self.instructions.push(Instruction::Cdq);
+                    self.instructions.push(Instruction::Idiv((*rhs).into()));
+                    if matches!(op, tacky::BinaryOperator::Div) {
+                        self.instructions.push(Instruction::Mov(
+                            Operand::Reg("eax".to_string()),
+                            (*dst).into(),
+                        ));
+                    } else {
+                        self.instructions.push(Instruction::Mov(
+                            Operand::Reg("edx".to_string()),
+                            (*dst).into(),
+                        ));
+                    }
+                }
+            },
         }
         Ok(())
     }
@@ -389,6 +447,43 @@ impl InstructionFixer {
                         ));
                     }
                     Instruction::Ret => {}
+                    Instruction::Binary(
+                        op @ (BinaryOperator::Add | BinaryOperator::Sub),
+                        Operand::Stack(lhs_offset),
+                        Operand::Stack(rhs_offset),
+                    ) => {
+                        instructions.push(Instruction::Mov(
+                            Operand::Stack(*lhs_offset),
+                            Operand::Reg("r10d".to_string()),
+                        ));
+                        instructions.push(Instruction::Binary(
+                            *op,
+                            Operand::Reg("r10d".to_string()),
+                            Operand::Stack(*rhs_offset),
+                        ));
+                    }
+                    Instruction::Binary(BinaryOperator::Mul, lhs, Operand::Stack(rhs_offset)) => {
+                        instructions.push(Instruction::Mov(
+                            Operand::Stack(*rhs_offset),
+                            Operand::Reg("r11d".to_string()),
+                        ));
+                        instructions.push(Instruction::Binary(
+                            BinaryOperator::Mul,
+                            lhs.clone(),
+                            Operand::Reg("r11d".to_string()),
+                        ));
+                        instructions.push(Instruction::Mov(
+                            Operand::Reg("r11d".to_string()),
+                            Operand::Stack(*rhs_offset),
+                        ));
+                    }
+                    Instruction::Idiv(Operand::Imm(n)) => {
+                        instructions.push(Instruction::Mov(
+                            Operand::Imm(*n),
+                            Operand::Reg("r10d".to_string()),
+                        ));
+                        instructions.push(Instruction::Idiv(Operand::Reg("r10d".to_string())));
+                    }
                     _ => {
                         instructions.push(instruction.clone());
                     }

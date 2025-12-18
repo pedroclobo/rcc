@@ -36,7 +36,7 @@ impl From<ast::UnaryOperator> for UnaryOperator {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum BinaryOperator {
     Add,
     Sub,
