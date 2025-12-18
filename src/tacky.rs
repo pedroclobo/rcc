@@ -18,6 +18,7 @@ pub struct FunctionDefinition<'a> {
 pub enum Instruction {
     Return(Value),
     Unary(UnaryOperator, Box<Value>, Box<Value>),
+    Binary(BinaryOperator, Box<Value>, Box<Value>, Box<Value>),
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -31,6 +32,27 @@ impl From<ast::UnaryOperator> for UnaryOperator {
         match op {
             ast::UnaryOperator::Tilde => UnaryOperator::Tilde,
             ast::UnaryOperator::Minus => UnaryOperator::Minus,
+        }
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum BinaryOperator {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+}
+
+impl From<ast::BinaryOperator> for BinaryOperator {
+    fn from(op: ast::BinaryOperator) -> Self {
+        match op {
+            ast::BinaryOperator::Add => BinaryOperator::Add,
+            ast::BinaryOperator::Sub => BinaryOperator::Sub,
+            ast::BinaryOperator::Mul => BinaryOperator::Mul,
+            ast::BinaryOperator::Div => BinaryOperator::Div,
+            ast::BinaryOperator::Mod => BinaryOperator::Mod,
         }
     }
 }
@@ -161,7 +183,22 @@ impl<'a> AstVisitor<'a> for TackyEmitter<'a> {
 
                 self.push_value(dst);
             }
-            Expression::Binary(_op, _left, _right) => todo!(),
+            Expression::Binary(op, lhs, rhs) => {
+                self.visit_expression(*lhs)?;
+                let lhs = self.values.pop().ok_or(TackyError::MissingValue)?;
+                self.visit_expression(*rhs)?;
+                let rhs = self.values.pop().ok_or(TackyError::MissingValue)?;
+
+                let dst = self.make_tmp();
+                self.add_instruction(Instruction::Binary(
+                    op.into(),
+                    Box::new(lhs),
+                    Box::new(rhs),
+                    Box::new(dst.clone()),
+                ));
+
+                self.push_value(dst);
+            }
         }
         Ok(())
     }
@@ -327,6 +364,72 @@ mod test {
                 assert_eq!(*val, Value::Var("tmp.2".to_string()));
             }
             _ => panic!("Expected Return instruction at position 3"),
+        }
+    }
+
+    #[test]
+    fn return_binop() {
+        /*
+        int main(void) {
+          return 1 + 2 * 3;
+        }
+        */
+
+        let one = ast::Expression::Constant(1);
+        let two = ast::Expression::Constant(2);
+        let three = ast::Expression::Constant(3);
+
+        let mul = ast::Expression::Binary(ast::BinaryOperator::Mul, Box::new(two), Box::new(three));
+        let add = ast::Expression::Binary(ast::BinaryOperator::Add, Box::new(one), Box::new(mul));
+
+        let return_stmt = ast::Statement::Return(add);
+        let main_function = ast::FunctionDefinition {
+            name: "main",
+            body: return_stmt,
+        };
+        let ast_program = ast::Program {
+            functions: vec![main_function],
+        };
+
+        let mut generator = TackyEmitter::new();
+        let _ = generator.visit_program(ast_program);
+
+        let program = generator.get_program().unwrap();
+        assert_eq!(program.functions.len(), 1);
+        assert_eq!(program.functions[0].name, "main");
+
+        // Expected instructions:
+        // 1. Binary(Mul, Constant(2), Constant(3))      -> tmp.0 = 2 * 3 = 6
+        // 2. Binary(Add, Constant(1), tmp.0)            -> tmp.1 = 1 + 6 = 7
+        // 3. Return(tmp.1)
+        assert_eq!(program.functions[0].body.len(), 3);
+
+        // 1. Binary(Mul, Constant(2), Constant(3))
+        match &program.functions[0].body[0] {
+            Instruction::Binary(BinaryOperator::Mul, lhs, rhs, dst) => {
+                assert_eq!(**lhs, Value::Constant(2));
+                assert_eq!(**rhs, Value::Constant(3));
+                assert_eq!(**dst, Value::Var("tmp.0".to_string()));
+            }
+            _ => panic!("Expected Unary(Minus, ...) instruction at position 0"),
+        }
+
+        // 2. Binary(Add, Constant(1), tmp.0)
+        match &program.functions[0].body[1] {
+            Instruction::Binary(BinaryOperator::Add, lhs, rhs, dst) => {
+                assert_eq!(**lhs, Value::Constant(1));
+                assert_eq!(**rhs, Value::Var("tmp.0".to_string()));
+                assert_eq!(**dst, Value::Var("tmp.1".to_string()));
+            }
+            _ => panic!("Expected Unary(Tilde, ...) instruction at position 1"),
+        }
+
+        // 3. Return(tmp.1)
+        match &program.functions[0].body[2] {
+            Instruction::Return(val) => {
+                assert_eq!(*val, Value::Var("tmp.1".to_string()));
+            }
+            _ => panic!("Expected Return instruction at position 2"),
         }
     }
 }

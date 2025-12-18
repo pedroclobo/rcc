@@ -252,6 +252,7 @@ impl<'a> TackyVisitor<'a> for X86Emitter<'a> {
                 self.instructions
                     .push(Instruction::Unary(op.into(), (*dst).into()));
             }
+            tacky::Instruction::Binary(_op, _lhs, _rhs, _dst) => todo!(),
         }
         Ok(())
     }
