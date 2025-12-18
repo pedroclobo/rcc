@@ -367,10 +367,10 @@ impl PseudoRegisterReplacer {
         for function in &program.functions {
             for instruction in &function.body {
                 for operand in instruction.operands() {
-                    if let Operand::PseudoReg(id) = operand {
-                        if !self.operands.contains_key(id) {
-                            self.add_pseudo_register(id);
-                        }
+                    if let Operand::PseudoReg(id) = operand
+                        && !self.operands.contains_key(id)
+                    {
+                        self.add_pseudo_register(id);
                     }
                 }
             }
