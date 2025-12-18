@@ -53,6 +53,32 @@ pub enum Instruction {
     Ret,
 }
 
+impl Instruction {
+    pub fn operands(&self) -> impl Iterator<Item = &Operand> {
+        match self {
+            Instruction::Mov(src, dst) => vec![dst, src],
+            Instruction::Unary(_, arg) => vec![arg],
+            Instruction::Binary(_, lhs, rhs) => vec![lhs, rhs],
+            Instruction::Push(arg) => vec![arg],
+            Instruction::Pop(arg) => vec![arg],
+            Instruction::Ret => vec![],
+        }
+        .into_iter()
+    }
+
+    pub fn operands_mut(&mut self) -> impl Iterator<Item = &mut Operand> {
+        match self {
+            Instruction::Mov(src, dst) => vec![dst, src],
+            Instruction::Unary(_, arg) => vec![arg],
+            Instruction::Binary(_, lhs, rhs) => vec![lhs, rhs],
+            Instruction::Push(arg) => vec![arg],
+            Instruction::Pop(arg) => vec![arg],
+            Instruction::Ret => vec![],
+        }
+        .into_iter()
+    }
+}
+
 impl std::fmt::Display for Instruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -272,70 +298,21 @@ impl PseudoRegisterReplacer {
         self.replace_pseudo_registers(program);
     }
 
+    fn add_pseudo_register(&mut self, id: &str) {
+        self.offset -= 4;
+        self.operands
+            .insert(id.to_string(), Operand::Stack(self.offset));
+    }
+
     fn collect_pseudo_registers(&mut self, program: &mut Program) {
         for function in &program.functions {
             for instruction in &function.body {
-                match instruction {
-                    Instruction::Mov(src, dst) => {
-                        if let Operand::PseudoReg(id) = src
-                            && !self.operands.contains_key(id)
-                        {
-                            self.offset -= 4;
-                            self.operands
-                                .insert(id.clone(), Operand::Stack(self.offset));
-                        }
-                        if let Operand::PseudoReg(id) = dst
-                            && !self.operands.contains_key(id)
-                        {
-                            self.offset -= 4;
-                            self.operands
-                                .insert(id.clone(), Operand::Stack(self.offset));
+                for operand in instruction.operands() {
+                    if let Operand::PseudoReg(id) = operand {
+                        if !self.operands.contains_key(id) {
+                            self.add_pseudo_register(id);
                         }
                     }
-                    Instruction::Unary(_, op) => {
-                        if let Operand::PseudoReg(id) = op
-                            && !self.operands.contains_key(id)
-                        {
-                            self.offset -= 4;
-                            self.operands
-                                .insert(id.clone(), Operand::Stack(self.offset));
-                        }
-                    }
-                    Instruction::Binary(_, left, right) => {
-                        if let Operand::PseudoReg(id) = left
-                            && !self.operands.contains_key(id)
-                        {
-                            self.offset -= 4;
-                            self.operands
-                                .insert(id.clone(), Operand::Stack(self.offset));
-                        }
-                        if let Operand::PseudoReg(id) = right
-                            && !self.operands.contains_key(id)
-                        {
-                            self.offset -= 4;
-                            self.operands
-                                .insert(id.clone(), Operand::Stack(self.offset));
-                        }
-                    }
-                    Instruction::Push(op) => {
-                        if let Operand::PseudoReg(id) = op
-                            && !self.operands.contains_key(id)
-                        {
-                            self.offset -= 4;
-                            self.operands
-                                .insert(id.clone(), Operand::Stack(self.offset));
-                        }
-                    }
-                    Instruction::Pop(op) => {
-                        if let Operand::PseudoReg(id) = op
-                            && !self.operands.contains_key(id)
-                        {
-                            self.offset -= 4;
-                            self.operands
-                                .insert(id.clone(), Operand::Stack(self.offset));
-                        }
-                    }
-                    Instruction::Ret => {}
                 }
             }
         }
@@ -344,55 +321,10 @@ impl PseudoRegisterReplacer {
     fn replace_pseudo_registers(&mut self, program: &mut Program) {
         for function in &mut program.functions {
             for instruction in &mut function.body {
-                match instruction {
-                    Instruction::Push(Operand::PseudoReg(id)) => {
-                        *instruction = Instruction::Push(
-                            self.operands.get(id).expect("Operand not found").clone(),
-                        );
+                for operand in instruction.operands_mut() {
+                    if let Operand::PseudoReg(id) = operand {
+                        *operand = self.operands.get(id).expect("Operand not found").clone();
                     }
-                    Instruction::Pop(Operand::PseudoReg(id)) => {
-                        *instruction = Instruction::Pop(
-                            self.operands.get(id).expect("Operand not found").clone(),
-                        );
-                    }
-                    Instruction::Ret => {}
-                    Instruction::Mov(Operand::PseudoReg(src_id), Operand::PseudoReg(dst_id)) => {
-                        *instruction = Instruction::Mov(
-                            self.operands
-                                .get(src_id)
-                                .expect("Operand not found")
-                                .clone(),
-                            self.operands
-                                .get(dst_id)
-                                .expect("Operand not found")
-                                .clone(),
-                        );
-                    }
-                    Instruction::Mov(src, Operand::PseudoReg(dst_id)) => {
-                        *instruction = Instruction::Mov(
-                            src.clone(),
-                            self.operands
-                                .get(dst_id)
-                                .expect("Operand not found")
-                                .clone(),
-                        );
-                    }
-                    Instruction::Mov(Operand::PseudoReg(src_id), dst) => {
-                        *instruction = Instruction::Mov(
-                            self.operands
-                                .get(src_id)
-                                .expect("Operand not found")
-                                .clone(),
-                            dst.clone(),
-                        );
-                    }
-                    Instruction::Unary(op, Operand::PseudoReg(id)) => {
-                        *instruction = Instruction::Unary(
-                            op.clone(),
-                            self.operands.get(id).expect("Operand not found").clone(),
-                        );
-                    }
-                    _ => {}
                 }
             }
         }
