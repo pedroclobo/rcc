@@ -1,3 +1,5 @@
+use crate::{lexer::TokenKind, parser::ParserError};
+
 #[derive(Debug)]
 pub struct Program<'a> {
     pub functions: Vec<FunctionDefinition<'a>>,
@@ -14,22 +16,47 @@ pub enum Statement {
     Return(Expression),
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum UnaryOperator {
     Tilde,
     Minus,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum BinaryOperator {
     Add,
     Sub,
     Mul,
     Div,
     Mod,
+    And,
+    Or,
+    Xor,
+    LShift,
+    RShift,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+impl TryFrom<TokenKind> for BinaryOperator {
+    type Error = ParserError<'static>;
+
+    fn try_from(kind: TokenKind) -> Result<Self, Self::Error> {
+        match kind {
+            TokenKind::Plus => Ok(BinaryOperator::Add),
+            TokenKind::Minus => Ok(BinaryOperator::Sub),
+            TokenKind::Mul => Ok(BinaryOperator::Mul),
+            TokenKind::Div => Ok(BinaryOperator::Div),
+            TokenKind::Mod => Ok(BinaryOperator::Mod),
+            TokenKind::Ampersand => Ok(BinaryOperator::And),
+            TokenKind::Pipe => Ok(BinaryOperator::Or),
+            TokenKind::Caret => Ok(BinaryOperator::Xor),
+            TokenKind::LShift => Ok(BinaryOperator::LShift),
+            TokenKind::RShift => Ok(BinaryOperator::RShift),
+            _ => Err(ParserError::InvalidBinaryOperator(kind)),
+        }
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Expression {
     Constant(i32),
     Unary(UnaryOperator, Box<Expression>),

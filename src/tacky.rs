@@ -83,6 +83,11 @@ pub enum BinaryOperator {
     Mul,
     Div,
     Mod,
+    And,
+    Or,
+    Xor,
+    Shl,
+    Shr,
 }
 
 impl std::fmt::Display for BinaryOperator {
@@ -93,6 +98,11 @@ impl std::fmt::Display for BinaryOperator {
             BinaryOperator::Mul => write!(f, "mul"),
             BinaryOperator::Div => write!(f, "div"),
             BinaryOperator::Mod => write!(f, "mod"),
+            BinaryOperator::And => write!(f, "and"),
+            BinaryOperator::Or => write!(f, "or"),
+            BinaryOperator::Xor => write!(f, "xor"),
+            BinaryOperator::Shl => write!(f, "shl"),
+            BinaryOperator::Shr => write!(f, "shr"),
         }
     }
 }
@@ -105,6 +115,11 @@ impl From<ast::BinaryOperator> for BinaryOperator {
             ast::BinaryOperator::Mul => BinaryOperator::Mul,
             ast::BinaryOperator::Div => BinaryOperator::Div,
             ast::BinaryOperator::Mod => BinaryOperator::Mod,
+            ast::BinaryOperator::And => BinaryOperator::And,
+            ast::BinaryOperator::Or => BinaryOperator::Or,
+            ast::BinaryOperator::Xor => BinaryOperator::Xor,
+            ast::BinaryOperator::LShift => BinaryOperator::Shl,
+            ast::BinaryOperator::RShift => BinaryOperator::Shr,
         }
     }
 }
@@ -429,21 +444,43 @@ mod test {
     }
 
     #[test]
-    fn return_binop() {
+    fn return_bitwise_binop() {
         /*
         int main(void) {
-          return 1 + 2 * 3;
+          return (1 & 2) | (3 ^ (4 << 1)) >> 1;
         }
         */
 
         let one = ast::Expression::Constant(1);
         let two = ast::Expression::Constant(2);
         let three = ast::Expression::Constant(3);
+        let four = ast::Expression::Constant(4);
 
-        let mul = ast::Expression::Binary(ast::BinaryOperator::Mul, Box::new(two), Box::new(three));
-        let add = ast::Expression::Binary(ast::BinaryOperator::Add, Box::new(one), Box::new(mul));
+        // 4 << 1
+        let shl = ast::Expression::Binary(
+            ast::BinaryOperator::LShift,
+            Box::new(four),
+            Box::new(one.clone()),
+        );
 
-        let return_stmt = ast::Statement::Return(add);
+        // 3 ^ (4 << 1)
+        let xor = ast::Expression::Binary(ast::BinaryOperator::Xor, Box::new(three), Box::new(shl));
+
+        // (1 & 2)
+        let and = ast::Expression::Binary(
+            ast::BinaryOperator::And,
+            Box::new(one.clone()),
+            Box::new(two),
+        );
+
+        // (3 ^ (4 << 1)) >> 1
+        let shr =
+            ast::Expression::Binary(ast::BinaryOperator::RShift, Box::new(xor), Box::new(one));
+
+        // (1 & 2) | ((3 ^ (4 << 1)) >> 1)
+        let or = ast::Expression::Binary(ast::BinaryOperator::Or, Box::new(and), Box::new(shr));
+
+        let return_stmt = ast::Statement::Return(or);
         let main_function = ast::FunctionDefinition {
             name: "main",
             body: return_stmt,
@@ -459,38 +496,72 @@ mod test {
         assert_eq!(program.functions.len(), 1);
         assert_eq!(program.functions[0].name, "main");
 
-        // Expected instructions:
-        // 1. Binary(Mul, Constant(2), Constant(3))      -> tmp.0 = 2 * 3 = 6
-        // 2. Binary(Add, Constant(1), tmp.0)            -> tmp.1 = 1 + 6 = 7
-        // 3. Return(tmp.1)
-        assert_eq!(program.functions[0].body.len(), 3);
+        // Expected instruction sequence:
+        // tmp.0 = 1 & 2
+        // tmp.1 = 4 << 1
+        // tmp.2 = 3 ^ tmp.1
+        // tmp.3 = tmp.2 >> 1
+        // tmp.4 = tmp.0 | tmp.3
+        // return tmp.4
+        assert_eq!(program.functions[0].body.len(), 6);
+        println!("{}", program);
 
-        // 1. Binary(Mul, Constant(2), Constant(3))
+        // 1. 1 & 2
         match &program.functions[0].body[0] {
-            Instruction::Binary(BinaryOperator::Mul, lhs, rhs, dst) => {
-                assert_eq!(**lhs, Value::Constant(2));
-                assert_eq!(**rhs, Value::Constant(3));
+            Instruction::Binary(BinaryOperator::And, lhs, rhs, dst) => {
+                assert_eq!(**lhs, Value::Constant(1));
+                assert_eq!(**rhs, Value::Constant(2));
                 assert_eq!(**dst, Value::Var("tmp.0".to_string()));
             }
-            _ => panic!("Expected Unary(Minus, ...) instruction at position 0"),
+            _ => panic!("Expected Binary(And) at position 0"),
         }
 
-        // 2. Binary(Add, Constant(1), tmp.0)
+        // 2. 4 << 1
         match &program.functions[0].body[1] {
-            Instruction::Binary(BinaryOperator::Add, lhs, rhs, dst) => {
-                assert_eq!(**lhs, Value::Constant(1));
-                assert_eq!(**rhs, Value::Var("tmp.0".to_string()));
+            Instruction::Binary(BinaryOperator::Shl, lhs, rhs, dst) => {
+                assert_eq!(**lhs, Value::Constant(4));
+                assert_eq!(**rhs, Value::Constant(1));
                 assert_eq!(**dst, Value::Var("tmp.1".to_string()));
             }
-            _ => panic!("Expected Unary(Tilde, ...) instruction at position 1"),
+            _ => panic!("Expected Binary(Shl) at position 1"),
         }
 
-        // 3. Return(tmp.1)
+        // 3. 3 ^ tmp.1
         match &program.functions[0].body[2] {
-            Instruction::Return(val) => {
-                assert_eq!(*val, Value::Var("tmp.1".to_string()));
+            Instruction::Binary(BinaryOperator::Xor, lhs, rhs, dst) => {
+                assert_eq!(**lhs, Value::Constant(3));
+                assert_eq!(**rhs, Value::Var("tmp.1".to_string()));
+                assert_eq!(**dst, Value::Var("tmp.2".to_string()));
             }
-            _ => panic!("Expected Return instruction at position 2"),
+            _ => panic!("Expected Binary(Xor) at position 2"),
+        }
+
+        // 4. tmp.2 >> 1
+        match &program.functions[0].body[3] {
+            Instruction::Binary(BinaryOperator::Shr, lhs, rhs, dst) => {
+                assert_eq!(**lhs, Value::Var("tmp.2".to_string()));
+                assert_eq!(**rhs, Value::Constant(1));
+                assert_eq!(**dst, Value::Var("tmp.3".to_string()));
+            }
+            _ => panic!("Expected Binary(Shr) at position 3"),
+        }
+
+        // 5. tmp.0 | tmp.3
+        match &program.functions[0].body[4] {
+            Instruction::Binary(BinaryOperator::Or, lhs, rhs, dst) => {
+                assert_eq!(**lhs, Value::Var("tmp.0".to_string()));
+                assert_eq!(**rhs, Value::Var("tmp.3".to_string()));
+                assert_eq!(**dst, Value::Var("tmp.4".to_string()));
+            }
+            _ => panic!("Expected Binary(Or) at position 4"),
+        }
+
+        // 6. return tmp.4
+        match &program.functions[0].body[5] {
+            Instruction::Return(val) => {
+                assert_eq!(*val, Value::Var("tmp.4".to_string()));
+            }
+            _ => panic!("Expected Return at position 5"),
         }
     }
 }

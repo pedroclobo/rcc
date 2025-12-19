@@ -129,6 +129,11 @@ pub enum BinaryOperator {
     Add,
     Sub,
     Mul,
+    And,
+    Or,
+    Xor,
+    Shl,
+    Sar,
 }
 
 impl From<tacky::BinaryOperator> for BinaryOperator {
@@ -139,6 +144,11 @@ impl From<tacky::BinaryOperator> for BinaryOperator {
             tacky::BinaryOperator::Mul => BinaryOperator::Mul,
             tacky::BinaryOperator::Div => panic!("div/mod should use `idiv`"),
             tacky::BinaryOperator::Mod => panic!("div/mod should use `idiv`"),
+            tacky::BinaryOperator::And => BinaryOperator::And,
+            tacky::BinaryOperator::Or => BinaryOperator::Or,
+            tacky::BinaryOperator::Xor => BinaryOperator::Xor,
+            tacky::BinaryOperator::Shl => BinaryOperator::Shl,
+            tacky::BinaryOperator::Shr => BinaryOperator::Sar,
         }
     }
 }
@@ -149,6 +159,11 @@ impl std::fmt::Display for BinaryOperator {
             BinaryOperator::Add => write!(f, "add"),
             BinaryOperator::Sub => write!(f, "sub"),
             BinaryOperator::Mul => write!(f, "imul"),
+            BinaryOperator::And => write!(f, "and"),
+            BinaryOperator::Or => write!(f, "or"),
+            BinaryOperator::Xor => write!(f, "xor"),
+            BinaryOperator::Shl => write!(f, "shl"),
+            BinaryOperator::Sar => write!(f, "sar"),
         }
     }
 }
@@ -190,22 +205,26 @@ impl std::fmt::Display for Operand {
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum Register {
     Eax,
+    Ecx,
     Edx,
     Rsp,
     Rbp,
     R10d,
     R11d,
+    Cl,
 }
 
 impl std::fmt::Display for Register {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Register::Eax => write!(f, "eax"),
+            Register::Ecx => write!(f, "ecx"),
             Register::Edx => write!(f, "edx"),
             Register::Rsp => write!(f, "rsp"),
             Register::Rbp => write!(f, "rbp"),
             Register::R10d => write!(f, "r10d"),
             Register::R11d => write!(f, "r11d"),
+            Register::Cl => write!(f, "cl"),
         }
     }
 }
@@ -300,7 +319,10 @@ impl<'a> TackyVisitor<'a> for X86Emitter<'a> {
             tacky::Instruction::Binary(op, lhs, rhs, dst) => match op {
                 tacky::BinaryOperator::Add
                 | tacky::BinaryOperator::Sub
-                | tacky::BinaryOperator::Mul => {
+                | tacky::BinaryOperator::Mul
+                | tacky::BinaryOperator::And
+                | tacky::BinaryOperator::Or
+                | tacky::BinaryOperator::Xor => {
                     self.instructions
                         .push(Instruction::Mov((*lhs).into(), (*dst.clone()).into()));
                     self.instructions.push(Instruction::Binary(
@@ -321,6 +343,27 @@ impl<'a> TackyVisitor<'a> for X86Emitter<'a> {
                         self.instructions
                             .push(Instruction::Mov(Operand::Reg(Register::Edx), (*dst).into()));
                     }
+                }
+                tacky::BinaryOperator::Shl | tacky::BinaryOperator::Shr => {
+                    self.instructions
+                        .push(Instruction::Mov((*lhs).into(), Operand::Reg(Register::Eax)));
+                    self.instructions
+                        .push(Instruction::Mov((*rhs).into(), Operand::Reg(Register::Ecx)));
+                    if matches!(op, tacky::BinaryOperator::Shl) {
+                        self.instructions.push(Instruction::Binary(
+                            BinaryOperator::Shl,
+                            Operand::Reg(Register::Cl),
+                            Operand::Reg(Register::Eax),
+                        ));
+                    } else {
+                        self.instructions.push(Instruction::Binary(
+                            BinaryOperator::Sar,
+                            Operand::Reg(Register::Cl),
+                            Operand::Reg(Register::Eax),
+                        ));
+                    }
+                    self.instructions
+                        .push(Instruction::Mov(Operand::Reg(Register::Eax), (*dst).into()));
                 }
             },
         }
@@ -460,7 +503,11 @@ impl InstructionFixer {
                     }
                     Instruction::Ret => {}
                     Instruction::Binary(
-                        op @ (BinaryOperator::Add | BinaryOperator::Sub),
+                        op @ (BinaryOperator::Add
+                        | BinaryOperator::Sub
+                        | BinaryOperator::And
+                        | BinaryOperator::Or
+                        | BinaryOperator::Xor),
                         Operand::Stack(lhs_offset),
                         Operand::Stack(rhs_offset),
                     ) => {

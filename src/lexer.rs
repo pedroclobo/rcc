@@ -38,6 +38,11 @@ pub enum TokenKind {
     Increment,
     Decrement,
     Tilde,
+    Ampersand,
+    Pipe,
+    Caret,
+    LShift,
+    RShift,
 }
 
 pub struct Lexer<'a> {
@@ -79,6 +84,17 @@ impl<'a> Lexer<'a> {
                     advanced = true;
                 } else {
                     break;
+                }
+            }
+
+            if let Some('#') = self.peek_char() {
+                self.next_char();
+                advanced = true;
+
+                while let Some(c) = self.next_char() {
+                    if c == '\n' {
+                        break;
+                    }
                 }
             }
 
@@ -176,6 +192,25 @@ impl<'a> Iterator for Lexer<'a> {
             '/' => Ok(Token::new(TokenKind::Div, "/")),
             '%' => Ok(Token::new(TokenKind::Mod, "%")),
             '~' => Ok(Token::new(TokenKind::Tilde, "~")),
+            '&' => Ok(Token::new(TokenKind::Ampersand, "&")),
+            '|' => Ok(Token::new(TokenKind::Pipe, "|")),
+            '^' => Ok(Token::new(TokenKind::Caret, "^")),
+            '<' => {
+                if let Some('<') = self.peek_char() {
+                    self.next_char();
+                    Ok(Token::new(TokenKind::LShift, "<<"))
+                } else {
+                    todo!()
+                }
+            }
+            '>' => {
+                if let Some('>') = self.peek_char() {
+                    self.next_char();
+                    Ok(Token::new(TokenKind::RShift, ">>"))
+                } else {
+                    todo!()
+                }
+            }
 
             '0'..='9' => self
                 .consume_constant()
@@ -199,6 +234,7 @@ impl<'a> Iterator for Lexer<'a> {
 pub enum LexerError<'a> {
     InvalidChar(char),
     InvalidConstant(&'a str),
+    InvalidSequence(&'a str),
 }
 
 impl Display for LexerError<'_> {
@@ -206,6 +242,7 @@ impl Display for LexerError<'_> {
         match self {
             LexerError::InvalidChar(c) => write!(f, "Invalid char: {}", c),
             LexerError::InvalidConstant(c) => write!(f, "Invalid constant literal: {}", c),
+            LexerError::InvalidSequence(s) => write!(f, "Invalid character sequence: {}", s),
         }
     }
 }
@@ -294,6 +331,20 @@ mod tests {
                 tok(TokenKind::Increment, "++"),
                 tok(TokenKind::Plus, "+"),
                 tok(TokenKind::Tilde, "~"),
+            ]
+        );
+    }
+
+    #[test]
+    fn bitwise() {
+        assert_eq!(
+            lex("& | ^ << >>").unwrap(),
+            vec![
+                tok(TokenKind::Ampersand, "&"),
+                tok(TokenKind::Pipe, "|"),
+                tok(TokenKind::Caret, "^"),
+                tok(TokenKind::LShift, "<<"),
+                tok(TokenKind::RShift, ">>"),
             ]
         );
     }

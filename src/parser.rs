@@ -8,17 +8,41 @@ use crate::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Precedence {
     None,
-    Low,
-    High,
+    BitwiseOr,      // |
+    BitwiseXor,     // ^
+    BitwiseAnd,     // &
+    Shift,          // <<, >>
+    Additive,       // +, -
+    Multiplicative, // *, /, %
     Highest,
+}
+
+fn is_binop(token: &Token) -> bool {
+    match token.kind {
+        TokenKind::Plus
+        | TokenKind::Minus
+        | TokenKind::Mul
+        | TokenKind::Div
+        | TokenKind::Mod
+        | TokenKind::Ampersand
+        | TokenKind::Pipe
+        | TokenKind::Caret
+        | TokenKind::LShift
+        | TokenKind::RShift => true,
+        _ => false,
+    }
 }
 
 impl Precedence {
     fn increment(self) -> Self {
         match self {
-            Precedence::None => Precedence::Low,
-            Precedence::Low => Precedence::High,
-            Precedence::High => Precedence::Highest,
+            Precedence::None => Precedence::BitwiseOr,
+            Precedence::BitwiseOr => Precedence::BitwiseXor,
+            Precedence::BitwiseXor => Precedence::BitwiseAnd,
+            Precedence::BitwiseAnd => Precedence::Shift,
+            Precedence::Shift => Precedence::Additive,
+            Precedence::Additive => Precedence::Multiplicative,
+            Precedence::Multiplicative => Precedence::Highest,
             Precedence::Highest => Precedence::Highest,
         }
     }
@@ -90,43 +114,30 @@ impl<'a> Parser<'a> {
 
     fn precedence(token: &Token) -> Precedence {
         match token.kind {
-            TokenKind::Plus | TokenKind::Minus => Precedence::Low,
-            TokenKind::Mul | TokenKind::Div | TokenKind::Mod => Precedence::High,
-            _ => Precedence::Low,
+            TokenKind::Mul | TokenKind::Div | TokenKind::Mod => Precedence::Multiplicative,
+            TokenKind::Plus | TokenKind::Minus => Precedence::Additive,
+            TokenKind::LShift | TokenKind::RShift => Precedence::Shift,
+            TokenKind::Ampersand => Precedence::BitwiseAnd,
+            TokenKind::Caret => Precedence::BitwiseXor,
+            TokenKind::Pipe => Precedence::BitwiseOr,
+            _ => Precedence::None,
         }
     }
 
     // <exp> ::= <factor> | <binexp>
-    // <binexp> ::= <factor> ("+" | "-" | "*" | "/" | "%") <factor>
+    // <binexp> ::= <factor> <binop> <factor>
     fn parse_expression(&mut self, precedence: Precedence) -> Result<Expression, ParserError<'a>> {
         let mut lhs = self.parse_factor()?;
         while let Some(Ok(token)) = self.lexer.peek()
             && Self::precedence(token) >= precedence
+            && is_binop(token)
         {
-            match token.kind {
-                TokenKind::Plus
-                | TokenKind::Minus
-                | TokenKind::Mul
-                | TokenKind::Div
-                | TokenKind::Mod => {
-                    let op = match token.kind {
-                        TokenKind::Plus => BinaryOperator::Add,
-                        TokenKind::Minus => BinaryOperator::Sub,
-                        TokenKind::Mul => BinaryOperator::Mul,
-                        TokenKind::Div => BinaryOperator::Div,
-                        TokenKind::Mod => BinaryOperator::Mod,
-                        _ => return Err(ParserError::InvalidUnaryOperator(token.kind)),
-                    };
-                    let precedence = Self::precedence(token);
-                    self.lexer.next();
+            let op = BinaryOperator::try_from(token.kind)?;
+            let precedence = Self::precedence(token);
+            self.lexer.next();
 
-                    let rhs = self.parse_expression(precedence.increment())?;
-                    lhs = Expression::Binary(op, Box::new(lhs), Box::new(rhs));
-                }
-                _ => {
-                    break;
-                }
-            }
+            let rhs = self.parse_expression(precedence.increment())?;
+            lhs = Expression::Binary(op, Box::new(lhs), Box::new(rhs));
         }
         Ok(lhs)
     }
@@ -341,6 +352,33 @@ mod tests {
                     Box::new(Expression::Constant(2)),
                     Box::new(Expression::Constant(3))
                 )),
+            )
+        );
+    }
+
+    #[test]
+    fn bitwise() {
+        let mut parser = Parser::new("1 << 2 & 3 ^ 4 | 5");
+        let expr = parser.parse_expression(Precedence::None).unwrap();
+
+        assert_eq!(
+            expr,
+            Expression::Binary(
+                BinaryOperator::Or,
+                Box::new(Expression::Binary(
+                    BinaryOperator::Xor,
+                    Box::new(Expression::Binary(
+                        BinaryOperator::And,
+                        Box::new(Expression::Binary(
+                            BinaryOperator::LShift,
+                            Box::new(Expression::Constant(1)),
+                            Box::new(Expression::Constant(2)),
+                        )),
+                        Box::new(Expression::Constant(3)),
+                    )),
+                    Box::new(Expression::Constant(4)),
+                )),
+                Box::new(Expression::Constant(5)),
             )
         );
     }
