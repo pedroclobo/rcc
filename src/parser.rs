@@ -22,27 +22,27 @@ enum Precedence {
 }
 
 fn is_binop(token: &Token) -> bool {
-    match token.kind {
+    matches!(
+        token.kind,
         TokenKind::Plus
-        | TokenKind::Minus
-        | TokenKind::Mul
-        | TokenKind::Div
-        | TokenKind::Mod
-        | TokenKind::Ampersand
-        | TokenKind::Pipe
-        | TokenKind::Caret
-        | TokenKind::LShift
-        | TokenKind::RShift
-        | TokenKind::And
-        | TokenKind::Or
-        | TokenKind::EqEq
-        | TokenKind::Neq
-        | TokenKind::Lt
-        | TokenKind::Gt
-        | TokenKind::Le
-        | TokenKind::Ge => true,
-        _ => false,
-    }
+            | TokenKind::Minus
+            | TokenKind::Mul
+            | TokenKind::Div
+            | TokenKind::Mod
+            | TokenKind::Ampersand
+            | TokenKind::Pipe
+            | TokenKind::Caret
+            | TokenKind::LShift
+            | TokenKind::RShift
+            | TokenKind::And
+            | TokenKind::Or
+            | TokenKind::EqEq
+            | TokenKind::Neq
+            | TokenKind::Lt
+            | TokenKind::Gt
+            | TokenKind::Le
+            | TokenKind::Ge,
+    )
 }
 
 impl Precedence {

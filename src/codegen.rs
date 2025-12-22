@@ -778,24 +778,26 @@ impl InstructionFixer {
                     }
                     Instruction::SetCC(cc, Operand::Stack { size: _, offset }) => {
                         instructions.push(Instruction::SetCC(
-                            cc.clone(),
+                            *cc,
                             Operand::Stack {
                                 size: 1,
                                 offset: *offset,
                             },
                         ));
                     }
-                    Instruction::SetCC(cc, Operand::Reg(reg)) => match reg {
-                        Register::Eax => instructions
-                            .push(Instruction::SetCC(cc.clone(), Operand::Reg(Register::Al))),
-                        Register::Edx => instructions
-                            .push(Instruction::SetCC(cc.clone(), Operand::Reg(Register::Dl))),
-                        Register::R10d => instructions
-                            .push(Instruction::SetCC(cc.clone(), Operand::Reg(Register::R10b))),
-                        Register::R11d => instructions
-                            .push(Instruction::SetCC(cc.clone(), Operand::Reg(Register::R11b))),
-                        _ => unreachable!(),
-                    },
+                    Instruction::SetCC(cc, Operand::Reg(reg)) => {
+                        match reg {
+                            Register::Eax => instructions
+                                .push(Instruction::SetCC(*cc, Operand::Reg(Register::Al))),
+                            Register::Edx => instructions
+                                .push(Instruction::SetCC(*cc, Operand::Reg(Register::Dl))),
+                            Register::R10d => instructions
+                                .push(Instruction::SetCC(*cc, Operand::Reg(Register::R10b))),
+                            Register::R11d => instructions
+                                .push(Instruction::SetCC(*cc, Operand::Reg(Register::R11b))),
+                            _ => unreachable!(),
+                        }
+                    }
                     _ => {
                         instructions.push(instruction.clone());
                     }
