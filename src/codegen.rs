@@ -157,6 +157,22 @@ pub enum ConditionCode {
     Ge,
 }
 
+impl TryFrom<tacky::BinaryOperator> for ConditionCode {
+    type Error = X86EmitterError;
+
+    fn try_from(op: tacky::BinaryOperator) -> Result<Self, Self::Error> {
+        match op {
+            tacky::BinaryOperator::Eq => Ok(ConditionCode::E),
+            tacky::BinaryOperator::Neq => Ok(ConditionCode::Ne),
+            tacky::BinaryOperator::Lt => Ok(ConditionCode::Lt),
+            tacky::BinaryOperator::Gt => Ok(ConditionCode::Gt),
+            tacky::BinaryOperator::Le => Ok(ConditionCode::Le),
+            tacky::BinaryOperator::Ge => Ok(ConditionCode::Ge),
+            _ => Err(X86EmitterError::NoMatchingConditionCode(op)),
+        }
+    }
+}
+
 impl Display for ConditionCode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -480,18 +496,7 @@ impl<'a> TackyVisitor<'a> for X86Emitter<'a> {
                     vec![
                         Instruction::Cmp((*rhs).into(), (*lhs).into()),
                         Instruction::Mov(Operand::Imm(0), (*dst).clone().into()),
-                        Instruction::SetCC(
-                            match op {
-                                tacky::BinaryOperator::Eq => ConditionCode::E,
-                                tacky::BinaryOperator::Neq => ConditionCode::Ne,
-                                tacky::BinaryOperator::Lt => ConditionCode::Lt,
-                                tacky::BinaryOperator::Gt => ConditionCode::Gt,
-                                tacky::BinaryOperator::Le => ConditionCode::Le,
-                                tacky::BinaryOperator::Ge => ConditionCode::Ge,
-                                _ => unreachable!(),
-                            },
-                            (*dst).into(),
-                        ),
+                        Instruction::SetCC(op.try_into()?, (*dst).into()),
                     ]
                 }
             },
@@ -816,6 +821,7 @@ impl InstructionFixer {
 pub enum X86EmitterError {
     NoProgram,
     UnsupportedBinaryOperator(tacky::BinaryOperator),
+    NoMatchingConditionCode(tacky::BinaryOperator),
 }
 
 impl Display for X86EmitterError {
@@ -824,6 +830,9 @@ impl Display for X86EmitterError {
             X86EmitterError::NoProgram => write!(f, "No program provided"),
             X86EmitterError::UnsupportedBinaryOperator(op) => {
                 write!(f, "No matching binary operator for {}", op)
+            }
+            X86EmitterError::NoMatchingConditionCode(op) => {
+                write!(f, "No matching condition code for {}", op)
             }
         }
     }
