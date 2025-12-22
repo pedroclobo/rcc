@@ -35,7 +35,10 @@ impl std::fmt::Display for FunctionDefinition<'_> {
         writeln!(f, "\t.globl {}", self.name)?;
         writeln!(f, "{}:", self.name)?;
         for instr in &self.body {
-            writeln!(f, "\t{}", instr)?;
+            match instr {
+                Instruction::Label(_) => writeln!(f, "{}", instr)?,
+                _ => writeln!(f, "\t{}", instr)?,
+            }
         }
         Ok(())
     }
@@ -53,6 +56,11 @@ pub enum Instruction {
     Cdq,
     Idiv(Operand),
     Ret,
+    Label(String),
+    Jmp(String),
+    JmpCC(ConditionCode, String),
+    SetCC(ConditionCode, Operand),
+    Cmp(Operand, Operand),
 }
 
 impl Instruction {
@@ -66,6 +74,11 @@ impl Instruction {
             Instruction::Ret => vec![],
             Instruction::Cdq => vec![],
             Instruction::Idiv(op) => vec![op],
+            Instruction::Label(_) => vec![],
+            Instruction::Jmp(_) => vec![],
+            Instruction::JmpCC(_, _) => vec![],
+            Instruction::SetCC(_, op) => vec![op],
+            Instruction::Cmp(lhs, rhs) => vec![lhs, rhs],
         }
         .into_iter()
     }
@@ -80,6 +93,11 @@ impl Instruction {
             Instruction::Ret => vec![],
             Instruction::Cdq => vec![],
             Instruction::Idiv(op) => vec![op],
+            Instruction::Label(_) => vec![],
+            Instruction::Jmp(_) => vec![],
+            Instruction::JmpCC(_, _) => vec![],
+            Instruction::SetCC(_, op) => vec![op],
+            Instruction::Cmp(lhs, rhs) => vec![lhs, rhs],
         }
         .into_iter()
     }
@@ -96,21 +114,75 @@ impl std::fmt::Display for Instruction {
             Instruction::Ret => write!(f, "ret"),
             Instruction::Cdq => write!(f, "cdq"),
             Instruction::Idiv(op) => write!(f, "idiv\t{}", op),
+            Instruction::Label(label) => write!(f, ".L{}:", label),
+            Instruction::Jmp(label) => write!(f, "jmp\t.L{}", label),
+            Instruction::JmpCC(cc, label) => write!(
+                f,
+                "j{}\t.L{}",
+                match cc {
+                    ConditionCode::E => "e",
+                    ConditionCode::Ne => "ne",
+                    ConditionCode::Lt => "l",
+                    ConditionCode::Gt => "g",
+                    ConditionCode::Le => "le",
+                    ConditionCode::Ge => "ge",
+                },
+                label
+            ),
+            Instruction::SetCC(cc, op) => write!(
+                f,
+                "set{}\t{}",
+                match cc {
+                    ConditionCode::E => "e",
+                    ConditionCode::Ne => "ne",
+                    ConditionCode::Lt => "l",
+                    ConditionCode::Gt => "g",
+                    ConditionCode::Le => "le",
+                    ConditionCode::Ge => "ge",
+                },
+                op
+            ),
+            Instruction::Cmp(lhs, rhs) => write!(f, "cmp\t{}, {}", rhs, lhs),
+        }
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+pub enum ConditionCode {
+    E,
+    Ne,
+    Lt,
+    Gt,
+    Le,
+    Ge,
+}
+
+impl Display for ConditionCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConditionCode::E => write!(f, "e"),
+            ConditionCode::Ne => write!(f, "ne"),
+            ConditionCode::Lt => write!(f, "lt"),
+            ConditionCode::Gt => write!(f, "gt"),
+            ConditionCode::Le => write!(f, "le"),
+            ConditionCode::Ge => write!(f, "ge"),
         }
     }
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum UnaryOperator {
-    Neg,
+    Tilde,
+    Minus,
     Not,
 }
 
 impl From<tacky::UnaryOperator> for UnaryOperator {
     fn from(op: tacky::UnaryOperator) -> Self {
         match op {
-            tacky::UnaryOperator::Minus => UnaryOperator::Neg,
-            tacky::UnaryOperator::Tilde => UnaryOperator::Not,
+            tacky::UnaryOperator::Minus => UnaryOperator::Minus,
+            tacky::UnaryOperator::Tilde => UnaryOperator::Tilde,
+            tacky::UnaryOperator::Not => UnaryOperator::Not,
         }
     }
 }
@@ -118,7 +190,9 @@ impl From<tacky::UnaryOperator> for UnaryOperator {
 impl std::fmt::Display for UnaryOperator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            UnaryOperator::Neg => write!(f, "neg"),
+            // TODO: better naming here
+            UnaryOperator::Minus => write!(f, "neg"),
+            UnaryOperator::Tilde => write!(f, "not"),
             UnaryOperator::Not => write!(f, "not"),
         }
     }
@@ -144,11 +218,17 @@ impl From<tacky::BinaryOperator> for BinaryOperator {
             tacky::BinaryOperator::Mul => BinaryOperator::Mul,
             tacky::BinaryOperator::Div => panic!("div/mod should use `idiv`"),
             tacky::BinaryOperator::Mod => panic!("div/mod should use `idiv`"),
-            tacky::BinaryOperator::And => BinaryOperator::And,
-            tacky::BinaryOperator::Or => BinaryOperator::Or,
+            tacky::BinaryOperator::BAnd => BinaryOperator::And,
+            tacky::BinaryOperator::BOr => BinaryOperator::Or,
             tacky::BinaryOperator::Xor => BinaryOperator::Xor,
             tacky::BinaryOperator::Shl => BinaryOperator::Shl,
             tacky::BinaryOperator::Shr => BinaryOperator::Sar,
+            tacky::BinaryOperator::Eq => todo!(),
+            tacky::BinaryOperator::Neq => todo!(),
+            tacky::BinaryOperator::Lt => todo!(),
+            tacky::BinaryOperator::Gt => todo!(),
+            tacky::BinaryOperator::Le => todo!(),
+            tacky::BinaryOperator::Ge => todo!(),
         }
     }
 }
@@ -173,7 +253,7 @@ pub enum Operand {
     Imm(i32),
     Reg(Register),
     PseudoReg(String),
-    Stack(i32),
+    Stack { size: i32, offset: i32 },
 }
 
 impl From<tacky::Value> for Operand {
@@ -191,12 +271,23 @@ impl std::fmt::Display for Operand {
             Operand::Imm(n) => write!(f, "{}", n),
             Operand::Reg(name) => write!(f, "{}", name),
             Operand::PseudoReg(name) => write!(f, "|{}", name),
-            Operand::Stack(offset) => {
-                if *offset < 0 {
-                    write!(f, "dword ptr [rsp - {}]", -offset)
-                } else {
-                    write!(f, "dword ptr [rsp + {}]", offset)
-                }
+            Operand::Stack { size, offset } => {
+                write!(
+                    f,
+                    "{} [rsp {}]",
+                    match size {
+                        1 => "byte ptr",
+                        2 => "word ptr",
+                        4 => "dword ptr",
+                        8 => "qword ptr",
+                        _ => panic!("Invalid stack size"),
+                    },
+                    if *offset < 0 {
+                        format!("- {}", -offset)
+                    } else {
+                        format!("+ {}", offset)
+                    }
+                )
             }
         }
     }
@@ -204,12 +295,16 @@ impl std::fmt::Display for Operand {
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum Register {
+    Al,
     Eax,
     Ecx,
+    Dl,
     Edx,
     Rsp,
     Rbp,
+    R10b,
     R10d,
+    R11b,
     R11d,
     Cl,
 }
@@ -225,6 +320,10 @@ impl std::fmt::Display for Register {
             Register::R10d => write!(f, "r10d"),
             Register::R11d => write!(f, "r11d"),
             Register::Cl => write!(f, "cl"),
+            Register::Al => write!(f, "al"),
+            Register::Dl => write!(f, "dl"),
+            Register::R10b => write!(f, "r10b"),
+            Register::R11b => write!(f, "r11b"),
         }
     }
 }
@@ -304,24 +403,35 @@ impl<'a> TackyVisitor<'a> for X86Emitter<'a> {
         &mut self,
         statement: crate::tacky::Instruction,
     ) -> Result<(), Self::Error> {
+        // TODO: push to vec inside
         match statement {
             tacky::Instruction::Return(value) => {
                 self.instructions
                     .push(Instruction::Mov(value.into(), Operand::Reg(Register::Eax)));
                 self.instructions.push(Instruction::Ret);
             }
-            tacky::Instruction::Unary(op, src, dst) => {
-                self.instructions
-                    .push(Instruction::Mov((*src).into(), (*dst.clone()).into()));
-                self.instructions
-                    .push(Instruction::Unary(op.into(), (*dst).into()));
-            }
+            tacky::Instruction::Unary(op, src, dst) => match op {
+                tacky::UnaryOperator::Tilde | tacky::UnaryOperator::Minus => {
+                    self.instructions
+                        .push(Instruction::Mov((*src).into(), (*dst.clone()).into()));
+                    self.instructions
+                        .push(Instruction::Unary(op.into(), (*dst).into()));
+                }
+                tacky::UnaryOperator::Not => {
+                    self.instructions
+                        .push(Instruction::Cmp(Operand::Imm(0), (*src).into()));
+                    self.instructions
+                        .push(Instruction::Mov(Operand::Imm(0), (*dst).clone().into()));
+                    self.instructions
+                        .push(Instruction::SetCC(ConditionCode::E, (*dst).into()));
+                }
+            },
             tacky::Instruction::Binary(op, lhs, rhs, dst) => match op {
                 tacky::BinaryOperator::Add
                 | tacky::BinaryOperator::Sub
                 | tacky::BinaryOperator::Mul
-                | tacky::BinaryOperator::And
-                | tacky::BinaryOperator::Or
+                | tacky::BinaryOperator::BAnd
+                | tacky::BinaryOperator::BOr
                 | tacky::BinaryOperator::Xor => {
                     self.instructions
                         .push(Instruction::Mov((*lhs).into(), (*dst.clone()).into()));
@@ -365,7 +475,52 @@ impl<'a> TackyVisitor<'a> for X86Emitter<'a> {
                     self.instructions
                         .push(Instruction::Mov(Operand::Reg(Register::Eax), (*dst).into()));
                 }
+                tacky::BinaryOperator::Eq
+                | tacky::BinaryOperator::Neq
+                | tacky::BinaryOperator::Lt
+                | tacky::BinaryOperator::Gt
+                | tacky::BinaryOperator::Le
+                | tacky::BinaryOperator::Ge => {
+                    self.instructions
+                        .push(Instruction::Cmp((*rhs).into(), (*lhs).into()));
+                    self.instructions
+                        .push(Instruction::Mov(Operand::Imm(0), (*dst).clone().into()));
+                    self.instructions.push(Instruction::SetCC(
+                        match op {
+                            tacky::BinaryOperator::Eq => ConditionCode::E,
+                            tacky::BinaryOperator::Neq => ConditionCode::Ne,
+                            tacky::BinaryOperator::Lt => ConditionCode::Lt,
+                            tacky::BinaryOperator::Gt => ConditionCode::Gt,
+                            tacky::BinaryOperator::Le => ConditionCode::Le,
+                            tacky::BinaryOperator::Ge => ConditionCode::Ge,
+                            _ => unreachable!(),
+                        },
+                        (*dst).into(),
+                    ));
+                }
             },
+            tacky::Instruction::Copy(src, dst) => {
+                self.instructions
+                    .push(Instruction::Mov((*src).into(), (*dst).into()));
+            }
+            tacky::Instruction::Label(label) => {
+                self.instructions.push(Instruction::Label(label));
+            }
+            tacky::Instruction::Jump(label) => {
+                self.instructions.push(Instruction::Jmp(label));
+            }
+            tacky::Instruction::JumpIfZero(value, label) => {
+                self.instructions
+                    .push(Instruction::Cmp((*value).into(), Operand::Imm(0)));
+                self.instructions
+                    .push(Instruction::JmpCC(ConditionCode::E, label));
+            }
+            tacky::Instruction::JumpIfNotZero(value, label) => {
+                self.instructions
+                    .push(Instruction::Cmp((*value).into(), Operand::Imm(0)));
+                self.instructions
+                    .push(Instruction::JmpCC(ConditionCode::Ne, label));
+            }
         }
         Ok(())
     }
@@ -414,8 +569,13 @@ impl PseudoRegisterReplacer {
 
     fn add_pseudo_register(&mut self, id: &str) {
         self.offset -= 4;
-        self.operands
-            .insert(id.to_string(), Operand::Stack(self.offset));
+        self.operands.insert(
+            id.to_string(),
+            Operand::Stack {
+                size: 4,
+                offset: self.offset,
+            },
+        );
     }
 
     fn collect_pseudo_registers(&mut self, program: &mut Program) {
@@ -491,14 +651,54 @@ impl InstructionFixer {
 
             for instruction in &function.body {
                 match instruction {
-                    Instruction::Mov(Operand::Stack(src_offset), Operand::Stack(dst_offset)) => {
+                    Instruction::Mov(
+                        Operand::Stack {
+                            size: src_size,
+                            offset: src_offset,
+                        },
+                        Operand::Stack {
+                            size: dst_size,
+                            offset: dst_offset,
+                        },
+                    ) => {
                         instructions.push(Instruction::Mov(
-                            Operand::Stack(*src_offset),
+                            Operand::Stack {
+                                size: *src_size,
+                                offset: *src_offset,
+                            },
                             Operand::Reg(Register::R10d),
                         ));
                         instructions.push(Instruction::Mov(
                             Operand::Reg(Register::R10d),
-                            Operand::Stack(*dst_offset),
+                            Operand::Stack {
+                                size: *dst_size,
+                                offset: *dst_offset,
+                            },
+                        ));
+                    }
+                    Instruction::Cmp(
+                        Operand::Stack {
+                            size: src_size,
+                            offset: src_offset,
+                        },
+                        Operand::Stack {
+                            size: dst_size,
+                            offset: dst_offset,
+                        },
+                    ) => {
+                        instructions.push(Instruction::Mov(
+                            Operand::Stack {
+                                size: *src_size,
+                                offset: *src_offset,
+                            },
+                            Operand::Reg(Register::R10d),
+                        ));
+                        instructions.push(Instruction::Cmp(
+                            Operand::Reg(Register::R10d),
+                            Operand::Stack {
+                                size: *dst_size,
+                                offset: *dst_offset,
+                            },
                         ));
                     }
                     Instruction::Ret => {}
@@ -508,22 +708,44 @@ impl InstructionFixer {
                         | BinaryOperator::And
                         | BinaryOperator::Or
                         | BinaryOperator::Xor),
-                        Operand::Stack(lhs_offset),
-                        Operand::Stack(rhs_offset),
+                        Operand::Stack {
+                            size: lhs_size,
+                            offset: lhs_offset,
+                        },
+                        Operand::Stack {
+                            size: rhs_size,
+                            offset: rhs_offset,
+                        },
                     ) => {
                         instructions.push(Instruction::Mov(
-                            Operand::Stack(*lhs_offset),
+                            Operand::Stack {
+                                size: *lhs_size,
+                                offset: *lhs_offset,
+                            },
                             Operand::Reg(Register::R10d),
                         ));
                         instructions.push(Instruction::Binary(
                             *op,
                             Operand::Reg(Register::R10d),
-                            Operand::Stack(*rhs_offset),
+                            Operand::Stack {
+                                size: *rhs_size,
+                                offset: *rhs_offset,
+                            },
                         ));
                     }
-                    Instruction::Binary(BinaryOperator::Mul, lhs, Operand::Stack(rhs_offset)) => {
+                    Instruction::Binary(
+                        BinaryOperator::Mul,
+                        lhs,
+                        Operand::Stack {
+                            size: rhs_size,
+                            offset: rhs_offset,
+                        },
+                    ) => {
                         instructions.push(Instruction::Mov(
-                            Operand::Stack(*rhs_offset),
+                            Operand::Stack {
+                                size: *rhs_size,
+                                offset: *rhs_offset,
+                            },
                             Operand::Reg(Register::R11d),
                         ));
                         instructions.push(Instruction::Binary(
@@ -533,7 +755,10 @@ impl InstructionFixer {
                         ));
                         instructions.push(Instruction::Mov(
                             Operand::Reg(Register::R11d),
-                            Operand::Stack(*rhs_offset),
+                            Operand::Stack {
+                                size: *rhs_size,
+                                offset: *rhs_offset,
+                            },
                         ));
                     }
                     Instruction::Idiv(Operand::Imm(n)) => {
@@ -543,6 +768,34 @@ impl InstructionFixer {
                         ));
                         instructions.push(Instruction::Idiv(Operand::Reg(Register::R10d)));
                     }
+                    Instruction::Cmp(lhs, Operand::Imm(n)) => {
+                        instructions.push(Instruction::Mov(
+                            Operand::Imm(*n),
+                            Operand::Reg(Register::R11d),
+                        ));
+                        instructions
+                            .push(Instruction::Cmp(lhs.clone(), Operand::Reg(Register::R11d)));
+                    }
+                    Instruction::SetCC(cc, Operand::Stack { size: _, offset }) => {
+                        instructions.push(Instruction::SetCC(
+                            cc.clone(),
+                            Operand::Stack {
+                                size: 1,
+                                offset: *offset,
+                            },
+                        ));
+                    }
+                    Instruction::SetCC(cc, Operand::Reg(reg)) => match reg {
+                        Register::Eax => instructions
+                            .push(Instruction::SetCC(cc.clone(), Operand::Reg(Register::Al))),
+                        Register::Edx => instructions
+                            .push(Instruction::SetCC(cc.clone(), Operand::Reg(Register::Dl))),
+                        Register::R10d => instructions
+                            .push(Instruction::SetCC(cc.clone(), Operand::Reg(Register::R10b))),
+                        Register::R11d => instructions
+                            .push(Instruction::SetCC(cc.clone(), Operand::Reg(Register::R11b))),
+                        _ => unreachable!(),
+                    },
                     _ => {
                         instructions.push(instruction.clone());
                     }

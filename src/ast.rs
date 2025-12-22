@@ -20,6 +20,7 @@ pub enum Statement {
 pub enum UnaryOperator {
     Tilde,
     Minus,
+    Not,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
@@ -29,11 +30,19 @@ pub enum BinaryOperator {
     Mul,
     Div,
     Mod,
-    And,
-    Or,
+    BAnd,
+    BOr,
     Xor,
     LShift,
     RShift,
+    And,
+    Or,
+    Eq,
+    Neq,
+    Lt,
+    Gt,
+    Le,
+    Ge,
 }
 
 impl TryFrom<TokenKind> for BinaryOperator {
@@ -46,11 +55,19 @@ impl TryFrom<TokenKind> for BinaryOperator {
             TokenKind::Mul => Ok(BinaryOperator::Mul),
             TokenKind::Div => Ok(BinaryOperator::Div),
             TokenKind::Mod => Ok(BinaryOperator::Mod),
-            TokenKind::Ampersand => Ok(BinaryOperator::And),
-            TokenKind::Pipe => Ok(BinaryOperator::Or),
+            TokenKind::Ampersand => Ok(BinaryOperator::BAnd),
+            TokenKind::Pipe => Ok(BinaryOperator::BOr),
             TokenKind::Caret => Ok(BinaryOperator::Xor),
             TokenKind::LShift => Ok(BinaryOperator::LShift),
             TokenKind::RShift => Ok(BinaryOperator::RShift),
+            TokenKind::And => Ok(BinaryOperator::And),
+            TokenKind::Or => Ok(BinaryOperator::Or),
+            TokenKind::EqEq => Ok(BinaryOperator::Eq),
+            TokenKind::Neq => Ok(BinaryOperator::Neq),
+            TokenKind::Lt => Ok(BinaryOperator::Lt),
+            TokenKind::Gt => Ok(BinaryOperator::Gt),
+            TokenKind::Le => Ok(BinaryOperator::Le),
+            TokenKind::Ge => Ok(BinaryOperator::Ge),
             _ => Err(ParserError::InvalidBinaryOperator(kind)),
         }
     }

@@ -8,9 +8,13 @@ use crate::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Precedence {
     None,
+    LogicalOr,      // ||
+    LogicalAnd,     // &&
     BitwiseOr,      // |
     BitwiseXor,     // ^
     BitwiseAnd,     // &
+    Equality,       // ==, !=
+    Relational,     // <, >, <=, >=
     Shift,          // <<, >>
     Additive,       // +, -
     Multiplicative, // *, /, %
@@ -28,7 +32,15 @@ fn is_binop(token: &Token) -> bool {
         | TokenKind::Pipe
         | TokenKind::Caret
         | TokenKind::LShift
-        | TokenKind::RShift => true,
+        | TokenKind::RShift
+        | TokenKind::And
+        | TokenKind::Or
+        | TokenKind::EqEq
+        | TokenKind::Neq
+        | TokenKind::Lt
+        | TokenKind::Gt
+        | TokenKind::Le
+        | TokenKind::Ge => true,
         _ => false,
     }
 }
@@ -36,10 +48,14 @@ fn is_binop(token: &Token) -> bool {
 impl Precedence {
     fn increment(self) -> Self {
         match self {
-            Precedence::None => Precedence::BitwiseOr,
+            Precedence::None => Precedence::LogicalOr,
+            Precedence::LogicalOr => Precedence::LogicalAnd,
+            Precedence::LogicalAnd => Precedence::BitwiseOr,
             Precedence::BitwiseOr => Precedence::BitwiseXor,
             Precedence::BitwiseXor => Precedence::BitwiseAnd,
-            Precedence::BitwiseAnd => Precedence::Shift,
+            Precedence::BitwiseAnd => Precedence::Equality,
+            Precedence::Equality => Precedence::Relational,
+            Precedence::Relational => Precedence::Shift,
             Precedence::Shift => Precedence::Additive,
             Precedence::Additive => Precedence::Multiplicative,
             Precedence::Multiplicative => Precedence::Highest,
@@ -117,9 +133,13 @@ impl<'a> Parser<'a> {
             TokenKind::Mul | TokenKind::Div | TokenKind::Mod => Precedence::Multiplicative,
             TokenKind::Plus | TokenKind::Minus => Precedence::Additive,
             TokenKind::LShift | TokenKind::RShift => Precedence::Shift,
+            TokenKind::Lt | TokenKind::Gt | TokenKind::Le | TokenKind::Ge => Precedence::Relational,
+            TokenKind::EqEq | TokenKind::Neq => Precedence::Equality,
             TokenKind::Ampersand => Precedence::BitwiseAnd,
             TokenKind::Caret => Precedence::BitwiseXor,
             TokenKind::Pipe => Precedence::BitwiseOr,
+            TokenKind::And => Precedence::LogicalAnd,
+            TokenKind::Or => Precedence::LogicalOr,
             _ => Precedence::None,
         }
     }
@@ -161,13 +181,14 @@ impl<'a> Parser<'a> {
                 self.expect(TokenKind::RParen)?;
                 Ok(expr)
             }
-            TokenKind::Minus | TokenKind::Tilde => self.parse_unary_expression(),
+            TokenKind::Minus | TokenKind::Tilde | TokenKind::Bang => self.parse_unary_expression(),
             _ => Err(ParserError::ExpectedAny(
                 &[
                     TokenKind::Constant,
                     TokenKind::LParen,
                     TokenKind::Minus,
                     TokenKind::Tilde,
+                    TokenKind::Bang,
                 ],
                 tok.kind,
             )),
@@ -175,13 +196,14 @@ impl<'a> Parser<'a> {
     }
 
     // <unexp> ::= <unop> <factor>
-    // <unop>  ::= "-" | "~"
+    // <unop>  ::= "-" | "~" | "!"
     fn parse_unary_expression(&mut self) -> Result<Expression, ParserError<'a>> {
-        let tok = self.expect_any(&[TokenKind::Minus, TokenKind::Tilde])?;
+        let tok = self.expect_any(&[TokenKind::Minus, TokenKind::Tilde, TokenKind::Bang])?;
 
         let op = match tok.kind {
             TokenKind::Minus => UnaryOperator::Minus,
             TokenKind::Tilde => UnaryOperator::Tilde,
+            TokenKind::Bang => UnaryOperator::Not,
             _ => return Err(ParserError::InvalidUnaryOperator(tok.kind)),
         };
 
@@ -364,11 +386,11 @@ mod tests {
         assert_eq!(
             expr,
             Expression::Binary(
-                BinaryOperator::Or,
+                BinaryOperator::BOr,
                 Box::new(Expression::Binary(
                     BinaryOperator::Xor,
                     Box::new(Expression::Binary(
-                        BinaryOperator::And,
+                        BinaryOperator::BAnd,
                         Box::new(Expression::Binary(
                             BinaryOperator::LShift,
                             Box::new(Expression::Constant(1)),
@@ -380,6 +402,40 @@ mod tests {
                 )),
                 Box::new(Expression::Constant(5)),
             )
+        );
+    }
+
+    #[test]
+    fn logical_and_comparison() {
+        let mut parser = Parser::new("1 < 2 && 3 || 4");
+        let expr = parser.parse_expression(Precedence::None).unwrap();
+
+        assert_eq!(
+            expr,
+            Expression::Binary(
+                BinaryOperator::Or,
+                Box::new(Expression::Binary(
+                    BinaryOperator::And,
+                    Box::new(Expression::Binary(
+                        BinaryOperator::Lt,
+                        Box::new(Expression::Constant(1)),
+                        Box::new(Expression::Constant(2)),
+                    )),
+                    Box::new(Expression::Constant(3)),
+                )),
+                Box::new(Expression::Constant(4)),
+            )
+        );
+    }
+
+    #[test]
+    fn bang() {
+        let mut parser = Parser::new("!1");
+        let expr = parser.parse_expression(Precedence::None).unwrap();
+
+        assert_eq!(
+            expr,
+            Expression::Unary(UnaryOperator::Not, Box::new(Expression::Constant(1)))
         );
     }
 }

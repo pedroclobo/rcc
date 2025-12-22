@@ -43,6 +43,15 @@ pub enum TokenKind {
     Caret,
     LShift,
     RShift,
+    Bang,
+    And,
+    Or,
+    EqEq,
+    Neq,
+    Lt,
+    Gt,
+    Le,
+    Ge,
 }
 
 pub struct Lexer<'a> {
@@ -192,21 +201,57 @@ impl<'a> Iterator for Lexer<'a> {
             '/' => Ok(Token::new(TokenKind::Div, "/")),
             '%' => Ok(Token::new(TokenKind::Mod, "%")),
             '~' => Ok(Token::new(TokenKind::Tilde, "~")),
-            '&' => Ok(Token::new(TokenKind::Ampersand, "&")),
-            '|' => Ok(Token::new(TokenKind::Pipe, "|")),
+            '&' => {
+                if let Some('&') = self.peek_char() {
+                    self.next_char();
+                    Ok(Token::new(TokenKind::And, "&&"))
+                } else {
+                    Ok(Token::new(TokenKind::Ampersand, "&"))
+                }
+            }
+            '|' => {
+                if let Some('|') = self.peek_char() {
+                    self.next_char();
+                    Ok(Token::new(TokenKind::Or, "||"))
+                } else {
+                    Ok(Token::new(TokenKind::Pipe, "|"))
+                }
+            }
             '^' => Ok(Token::new(TokenKind::Caret, "^")),
+            '!' => {
+                if let Some('=') = self.peek_char() {
+                    self.next_char();
+                    Ok(Token::new(TokenKind::Neq, "!="))
+                } else {
+                    Ok(Token::new(TokenKind::Bang, "!"))
+                }
+            }
             '<' => {
                 if let Some('<') = self.peek_char() {
                     self.next_char();
                     Ok(Token::new(TokenKind::LShift, "<<"))
+                } else if let Some('=') = self.peek_char() {
+                    self.next_char();
+                    Ok(Token::new(TokenKind::Le, "<="))
                 } else {
-                    todo!()
+                    Ok(Token::new(TokenKind::Lt, "<"))
                 }
             }
             '>' => {
                 if let Some('>') = self.peek_char() {
                     self.next_char();
                     Ok(Token::new(TokenKind::RShift, ">>"))
+                } else if let Some('=') = self.peek_char() {
+                    self.next_char();
+                    Ok(Token::new(TokenKind::Ge, ">="))
+                } else {
+                    Ok(Token::new(TokenKind::Gt, ">"))
+                }
+            }
+            '=' => {
+                if let Some('=') = self.peek_char() {
+                    self.next_char();
+                    Ok(Token::new(TokenKind::EqEq, "=="))
                 } else {
                     todo!()
                 }
@@ -345,6 +390,23 @@ mod tests {
                 tok(TokenKind::Caret, "^"),
                 tok(TokenKind::LShift, "<<"),
                 tok(TokenKind::RShift, ">>"),
+            ]
+        );
+    }
+
+    #[test]
+    fn logical_and_relational() {
+        assert_eq!(
+            lex("&& || == != < > <= >=").unwrap(),
+            vec![
+                tok(TokenKind::And, "&&"),
+                tok(TokenKind::Or, "||"),
+                tok(TokenKind::EqEq, "=="),
+                tok(TokenKind::Neq, "!="),
+                tok(TokenKind::Lt, "<"),
+                tok(TokenKind::Gt, ">"),
+                tok(TokenKind::Le, "<="),
+                tok(TokenKind::Ge, ">="),
             ]
         );
     }

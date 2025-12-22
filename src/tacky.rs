@@ -27,7 +27,7 @@ impl std::fmt::Display for FunctionDefinition<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "{}:", self.name)?;
         for instruction in &self.body {
-            writeln!(f, "\t{}", instruction)?;
+            writeln!(f, "{}", instruction)?;
         }
         Ok(())
     }
@@ -38,16 +38,26 @@ pub enum Instruction {
     Return(Value),
     Unary(UnaryOperator, Box<Value>, Box<Value>),
     Binary(BinaryOperator, Box<Value>, Box<Value>, Box<Value>),
+    Copy(Box<Value>, Box<Value>),
+    Label(String),
+    Jump(String),
+    JumpIfZero(Box<Value>, String),
+    JumpIfNotZero(Box<Value>, String),
 }
 
 impl std::fmt::Display for Instruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Instruction::Return(val) => write!(f, "return {}", val),
-            Instruction::Unary(op, src, dst) => write!(f, "{} {} = {}", op, src, dst),
+            Instruction::Return(val) => write!(f, "\treturn {}", val),
+            Instruction::Unary(op, src, dst) => write!(f, "\t{} {} = {}", op, src, dst),
             Instruction::Binary(op, lhs, rhs, dst) => {
-                write!(f, "{} = {} {} {}", dst, op, lhs, rhs)
+                write!(f, "\t{} = {} {} {}", dst, op, lhs, rhs)
             }
+            Instruction::Copy(src, dst) => write!(f, "\tid {} = {}", dst, src),
+            Instruction::Label(label) => write!(f, "{}: ", label),
+            Instruction::Jump(label) => write!(f, "\tjmp {}", label),
+            Instruction::JumpIfZero(value, label) => write!(f, "\tjz {} {}", value, label),
+            Instruction::JumpIfNotZero(value, label) => write!(f, "\tjnz {} {}", value, label),
         }
     }
 }
@@ -56,6 +66,7 @@ impl std::fmt::Display for Instruction {
 pub enum UnaryOperator {
     Tilde,
     Minus,
+    Not,
 }
 
 impl std::fmt::Display for UnaryOperator {
@@ -63,6 +74,7 @@ impl std::fmt::Display for UnaryOperator {
         match self {
             UnaryOperator::Tilde => write!(f, "not"),
             UnaryOperator::Minus => write!(f, "neg"),
+            UnaryOperator::Not => write!(f, "not"),
         }
     }
 }
@@ -72,6 +84,7 @@ impl From<ast::UnaryOperator> for UnaryOperator {
         match op {
             ast::UnaryOperator::Tilde => UnaryOperator::Tilde,
             ast::UnaryOperator::Minus => UnaryOperator::Minus,
+            ast::UnaryOperator::Not => UnaryOperator::Not,
         }
     }
 }
@@ -83,11 +96,17 @@ pub enum BinaryOperator {
     Mul,
     Div,
     Mod,
-    And,
-    Or,
+    BAnd,
+    BOr,
     Xor,
     Shl,
     Shr,
+    Eq,
+    Neq,
+    Lt,
+    Gt,
+    Le,
+    Ge,
 }
 
 impl std::fmt::Display for BinaryOperator {
@@ -98,15 +117,22 @@ impl std::fmt::Display for BinaryOperator {
             BinaryOperator::Mul => write!(f, "mul"),
             BinaryOperator::Div => write!(f, "div"),
             BinaryOperator::Mod => write!(f, "mod"),
-            BinaryOperator::And => write!(f, "and"),
-            BinaryOperator::Or => write!(f, "or"),
+            BinaryOperator::BAnd => write!(f, "and"),
+            BinaryOperator::BOr => write!(f, "or"),
             BinaryOperator::Xor => write!(f, "xor"),
             BinaryOperator::Shl => write!(f, "shl"),
             BinaryOperator::Shr => write!(f, "shr"),
+            BinaryOperator::Eq => write!(f, "eq"),
+            BinaryOperator::Neq => write!(f, "neq"),
+            BinaryOperator::Lt => write!(f, "lt"),
+            BinaryOperator::Gt => write!(f, "gt"),
+            BinaryOperator::Le => write!(f, "le"),
+            BinaryOperator::Ge => write!(f, "ge"),
         }
     }
 }
 
+// TODO: try from?
 impl From<ast::BinaryOperator> for BinaryOperator {
     fn from(op: ast::BinaryOperator) -> Self {
         match op {
@@ -115,11 +141,19 @@ impl From<ast::BinaryOperator> for BinaryOperator {
             ast::BinaryOperator::Mul => BinaryOperator::Mul,
             ast::BinaryOperator::Div => BinaryOperator::Div,
             ast::BinaryOperator::Mod => BinaryOperator::Mod,
-            ast::BinaryOperator::And => BinaryOperator::And,
-            ast::BinaryOperator::Or => BinaryOperator::Or,
+            ast::BinaryOperator::BAnd => BinaryOperator::BAnd,
+            ast::BinaryOperator::BOr => BinaryOperator::BOr,
             ast::BinaryOperator::Xor => BinaryOperator::Xor,
             ast::BinaryOperator::LShift => BinaryOperator::Shl,
             ast::BinaryOperator::RShift => BinaryOperator::Shr,
+            ast::BinaryOperator::And => panic!("And operator not supported"),
+            ast::BinaryOperator::Or => panic!("Or operator not supported"),
+            ast::BinaryOperator::Eq => BinaryOperator::Eq,
+            ast::BinaryOperator::Neq => BinaryOperator::Neq,
+            ast::BinaryOperator::Lt => BinaryOperator::Lt,
+            ast::BinaryOperator::Gt => BinaryOperator::Gt,
+            ast::BinaryOperator::Le => BinaryOperator::Le,
+            ast::BinaryOperator::Ge => BinaryOperator::Ge,
         }
     }
 }
@@ -176,6 +210,12 @@ impl TackyEmitter<'_> {
         let tmp = format!("tmp.{}", self.counter);
         self.counter += 1;
         Value::Var(tmp)
+    }
+
+    fn make_label(&mut self) -> String {
+        let tmp = format!("{}", self.counter);
+        self.counter += 1;
+        tmp
     }
 
     fn add_instruction(&mut self, instruction: Instruction) {
@@ -260,20 +300,97 @@ impl<'a> AstVisitor<'a> for TackyEmitter<'a> {
                 self.push_value(dst);
             }
             Expression::Binary(op, lhs, rhs) => {
-                self.visit_expression(*lhs)?;
-                let lhs = self.values.pop().ok_or(TackyError::MissingValue)?;
-                self.visit_expression(*rhs)?;
-                let rhs = self.values.pop().ok_or(TackyError::MissingValue)?;
+                if matches!(op, ast::BinaryOperator::And) {
+                    self.visit_expression(*lhs)?;
+                    let lhs = self.values.pop().ok_or(TackyError::MissingValue)?;
 
-                let dst = self.make_tmp();
-                self.add_instruction(Instruction::Binary(
-                    op.into(),
-                    Box::new(lhs),
-                    Box::new(rhs),
-                    Box::new(dst.clone()),
-                ));
+                    let false_label = self.make_label();
+                    let v1 = self.make_tmp();
+                    self.add_instruction(Instruction::Copy(Box::new(lhs.clone()), Box::new(v1)));
+                    self.add_instruction(Instruction::JumpIfZero(
+                        Box::new(lhs.clone()),
+                        false_label.clone(),
+                    ));
 
-                self.push_value(dst);
+                    self.visit_expression(*rhs)?;
+                    let rhs = self.values.pop().ok_or(TackyError::MissingValue)?;
+
+                    let v2 = self.make_tmp();
+                    self.add_instruction(Instruction::Copy(Box::new(rhs.clone()), Box::new(v2)));
+                    self.add_instruction(Instruction::JumpIfZero(
+                        Box::new(rhs.clone()),
+                        false_label.clone(),
+                    ));
+
+                    let dst = self.make_tmp();
+                    self.add_instruction(Instruction::Copy(
+                        Box::new(Value::Constant(1)),
+                        Box::new(dst.clone()),
+                    ));
+                    let end_label = self.make_label();
+                    self.add_instruction(Instruction::Jump(end_label.clone()));
+
+                    self.add_instruction(Instruction::Label(false_label.clone()));
+                    self.add_instruction(Instruction::Copy(
+                        Box::new(Value::Constant(0)),
+                        Box::new(dst.clone()),
+                    ));
+                    self.add_instruction(Instruction::Label(end_label.clone()));
+
+                    self.push_value(dst.clone());
+                } else if matches!(op, ast::BinaryOperator::Or) {
+                    self.visit_expression(*lhs)?;
+                    let lhs = self.values.pop().ok_or(TackyError::MissingValue)?;
+
+                    let true_label = self.make_label();
+                    let v1 = self.make_tmp();
+                    self.add_instruction(Instruction::Copy(Box::new(lhs.clone()), Box::new(v1)));
+                    self.add_instruction(Instruction::JumpIfNotZero(
+                        Box::new(lhs.clone()),
+                        true_label.clone(),
+                    ));
+
+                    self.visit_expression(*rhs)?;
+                    let rhs = self.values.pop().ok_or(TackyError::MissingValue)?;
+                    let v2 = self.make_tmp();
+                    self.add_instruction(Instruction::Copy(Box::new(rhs.clone()), Box::new(v2)));
+                    self.add_instruction(Instruction::JumpIfNotZero(
+                        Box::new(rhs.clone()),
+                        true_label.clone(),
+                    ));
+
+                    let dst = self.make_tmp();
+                    self.add_instruction(Instruction::Copy(
+                        Box::new(Value::Constant(0)),
+                        Box::new(dst.clone()),
+                    ));
+                    let end_label = self.make_label();
+                    self.add_instruction(Instruction::Jump(end_label.clone()));
+
+                    self.add_instruction(Instruction::Label(true_label.clone()));
+                    self.add_instruction(Instruction::Copy(
+                        Box::new(Value::Constant(1)),
+                        Box::new(dst.clone()),
+                    ));
+                    self.add_instruction(Instruction::Label(end_label.clone()));
+
+                    self.push_value(dst.clone());
+                } else {
+                    self.visit_expression(*lhs)?;
+                    let lhs = self.values.pop().ok_or(TackyError::MissingValue)?;
+                    self.visit_expression(*rhs)?;
+                    let rhs = self.values.pop().ok_or(TackyError::MissingValue)?;
+
+                    let dst = self.make_tmp();
+                    self.add_instruction(Instruction::Binary(
+                        op.into(),
+                        Box::new(lhs),
+                        Box::new(rhs),
+                        Box::new(dst.clone()),
+                    ));
+
+                    self.push_value(dst);
+                }
             }
         }
         Ok(())
@@ -468,7 +585,7 @@ mod test {
 
         // (1 & 2)
         let and = ast::Expression::Binary(
-            ast::BinaryOperator::And,
+            ast::BinaryOperator::BAnd,
             Box::new(one.clone()),
             Box::new(two),
         );
@@ -478,7 +595,7 @@ mod test {
             ast::Expression::Binary(ast::BinaryOperator::RShift, Box::new(xor), Box::new(one));
 
         // (1 & 2) | ((3 ^ (4 << 1)) >> 1)
-        let or = ast::Expression::Binary(ast::BinaryOperator::Or, Box::new(and), Box::new(shr));
+        let or = ast::Expression::Binary(ast::BinaryOperator::BOr, Box::new(and), Box::new(shr));
 
         let return_stmt = ast::Statement::Return(or);
         let main_function = ast::FunctionDefinition {
@@ -508,7 +625,7 @@ mod test {
 
         // 1. 1 & 2
         match &program.functions[0].body[0] {
-            Instruction::Binary(BinaryOperator::And, lhs, rhs, dst) => {
+            Instruction::Binary(BinaryOperator::BAnd, lhs, rhs, dst) => {
                 assert_eq!(**lhs, Value::Constant(1));
                 assert_eq!(**rhs, Value::Constant(2));
                 assert_eq!(**dst, Value::Var("tmp.0".to_string()));
@@ -548,7 +665,7 @@ mod test {
 
         // 5. tmp.0 | tmp.3
         match &program.functions[0].body[4] {
-            Instruction::Binary(BinaryOperator::Or, lhs, rhs, dst) => {
+            Instruction::Binary(BinaryOperator::BOr, lhs, rhs, dst) => {
                 assert_eq!(**lhs, Value::Var("tmp.0".to_string()));
                 assert_eq!(**rhs, Value::Var("tmp.3".to_string()));
                 assert_eq!(**dst, Value::Var("tmp.4".to_string()));
@@ -562,6 +679,151 @@ mod test {
                 assert_eq!(*val, Value::Var("tmp.4".to_string()));
             }
             _ => panic!("Expected Return at position 5"),
+        }
+    }
+
+    #[test]
+    fn return_comparison_binop() {
+        /*
+        int main(void) {
+          return (1 < 2) == (3 != 4) && (5 <= 6) >= (7 > 8);
+        }
+        */
+
+        let one = ast::Expression::Constant(1);
+        let two = ast::Expression::Constant(2);
+        let three = ast::Expression::Constant(3);
+        let four = ast::Expression::Constant(4);
+        let five = ast::Expression::Constant(5);
+        let six = ast::Expression::Constant(6);
+        let seven = ast::Expression::Constant(7);
+        let eight = ast::Expression::Constant(8);
+
+        // 1 < 2
+        let lt = ast::Expression::Binary(ast::BinaryOperator::Lt, Box::new(one), Box::new(two));
+
+        // 3 != 4
+        let neq =
+            ast::Expression::Binary(ast::BinaryOperator::Neq, Box::new(three), Box::new(four));
+
+        // (1 < 2) == (3 != 4)
+        let eq = ast::Expression::Binary(ast::BinaryOperator::Eq, Box::new(lt), Box::new(neq));
+
+        // 5 <= 6
+        let le = ast::Expression::Binary(ast::BinaryOperator::Le, Box::new(five), Box::new(six));
+
+        // 7 > 8
+        let gt = ast::Expression::Binary(ast::BinaryOperator::Gt, Box::new(seven), Box::new(eight));
+
+        // (5 <= 6) >= (7 > 8)
+        let ge = ast::Expression::Binary(ast::BinaryOperator::Ge, Box::new(le), Box::new(gt));
+
+        // ((1 < 2) == (3 != 4)) && ((5 <= 6) >= (7 > 8))
+        let and = ast::Expression::Binary(ast::BinaryOperator::And, Box::new(eq), Box::new(ge));
+
+        let return_stmt = ast::Statement::Return(and);
+        let main_function = ast::FunctionDefinition {
+            name: "main",
+            body: return_stmt,
+        };
+        let ast_program = ast::Program {
+            functions: vec![main_function],
+        };
+
+        let mut generator = TackyEmitter::new();
+        let _ = generator.visit_program(ast_program);
+
+        let program = generator.get_program().unwrap();
+        assert_eq!(program.functions.len(), 1);
+        assert_eq!(program.functions[0].name, "main");
+
+        // Expected instruction sequence:
+        // tmp.0 = 1 < 2
+        // tmp.1 = 3 != 4
+        // tmp.2 = tmp.0 == tmp.1
+        // tmp.3 = 5 <= 6
+        // tmp.4 = 7 > 8
+        // tmp.5 = tmp.3 >= tmp.4
+        // tmp.6 = tmp.2 && tmp.5
+        // return tmp.6
+        assert_eq!(program.functions[0].body.len(), 8);
+
+        // 1. 1 < 2
+        match &program.functions[0].body[0] {
+            Instruction::Binary(BinaryOperator::Lt, lhs, rhs, dst) => {
+                assert_eq!(**lhs, Value::Constant(1));
+                assert_eq!(**rhs, Value::Constant(2));
+                assert_eq!(**dst, Value::Var("tmp.0".to_string()));
+            }
+            _ => panic!("Expected Binary(Lt) at position 0"),
+        }
+
+        // 2. 3 != 4
+        match &program.functions[0].body[1] {
+            Instruction::Binary(BinaryOperator::Neq, lhs, rhs, dst) => {
+                assert_eq!(**lhs, Value::Constant(3));
+                assert_eq!(**rhs, Value::Constant(4));
+                assert_eq!(**dst, Value::Var("tmp.1".to_string()));
+            }
+            _ => panic!("Expected Binary(Neq) at position 1"),
+        }
+
+        // 3. tmp.0 == tmp.1
+        match &program.functions[0].body[2] {
+            Instruction::Binary(BinaryOperator::Eq, lhs, rhs, dst) => {
+                assert_eq!(**lhs, Value::Var("tmp.0".to_string()));
+                assert_eq!(**rhs, Value::Var("tmp.1".to_string()));
+                assert_eq!(**dst, Value::Var("tmp.2".to_string()));
+            }
+            _ => panic!("Expected Binary(Eq) at position 2"),
+        }
+
+        // 4. 5 <= 6
+        match &program.functions[0].body[3] {
+            Instruction::Binary(BinaryOperator::Le, lhs, rhs, dst) => {
+                assert_eq!(**lhs, Value::Constant(5));
+                assert_eq!(**rhs, Value::Constant(6));
+                assert_eq!(**dst, Value::Var("tmp.3".to_string()));
+            }
+            _ => panic!("Expected Binary(Le) at position 3"),
+        }
+
+        // 5. 7 > 8
+        match &program.functions[0].body[4] {
+            Instruction::Binary(BinaryOperator::Gt, lhs, rhs, dst) => {
+                assert_eq!(**lhs, Value::Constant(7));
+                assert_eq!(**rhs, Value::Constant(8));
+                assert_eq!(**dst, Value::Var("tmp.4".to_string()));
+            }
+            _ => panic!("Expected Binary(Gt) at position 4"),
+        }
+
+        // 6. tmp.3 >= tmp.4
+        match &program.functions[0].body[5] {
+            Instruction::Binary(BinaryOperator::Ge, lhs, rhs, dst) => {
+                assert_eq!(**lhs, Value::Var("tmp.3".to_string()));
+                assert_eq!(**rhs, Value::Var("tmp.4".to_string()));
+                assert_eq!(**dst, Value::Var("tmp.5".to_string()));
+            }
+            _ => panic!("Expected Binary(Ge) at position 5"),
+        }
+
+        // 7. tmp.2 && tmp.5
+        match &program.functions[0].body[6] {
+            Instruction::Binary(BinaryOperator::And, lhs, rhs, dst) => {
+                assert_eq!(**lhs, Value::Var("tmp.2".to_string()));
+                assert_eq!(**rhs, Value::Var("tmp.5".to_string()));
+                assert_eq!(**dst, Value::Var("tmp.6".to_string()));
+            }
+            _ => panic!("Expected Binary(And) at position 6"),
+        }
+
+        // 8. return tmp.6
+        match &program.functions[0].body[7] {
+            Instruction::Return(val) => {
+                assert_eq!(*val, Value::Var("tmp.6".to_string()));
+            }
+            _ => panic!("Expected Return at position 7"),
         }
     }
 }
