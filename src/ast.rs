@@ -73,6 +73,31 @@ impl TryFrom<TokenKind> for BinaryOperator {
     }
 }
 
+impl std::fmt::Display for BinaryOperator {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            BinaryOperator::Add => write!(f, "+"),
+            BinaryOperator::Sub => write!(f, "-"),
+            BinaryOperator::Mul => write!(f, "*"),
+            BinaryOperator::Div => write!(f, "/"),
+            BinaryOperator::Mod => write!(f, "%"),
+            BinaryOperator::BAnd => write!(f, "&"),
+            BinaryOperator::BOr => write!(f, "|"),
+            BinaryOperator::Xor => write!(f, "^"),
+            BinaryOperator::LShift => write!(f, "<<"),
+            BinaryOperator::RShift => write!(f, ">>"),
+            BinaryOperator::And => write!(f, "&&"),
+            BinaryOperator::Or => write!(f, "||"),
+            BinaryOperator::Eq => write!(f, "=="),
+            BinaryOperator::Neq => write!(f, "!="),
+            BinaryOperator::Lt => write!(f, "<"),
+            BinaryOperator::Gt => write!(f, ">"),
+            BinaryOperator::Le => write!(f, "<="),
+            BinaryOperator::Ge => write!(f, ">="),
+        }
+    }
+}
+
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Expression {
     Constant(i32),

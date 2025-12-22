@@ -132,28 +132,28 @@ impl std::fmt::Display for BinaryOperator {
     }
 }
 
-// TODO: try from?
-impl From<ast::BinaryOperator> for BinaryOperator {
-    fn from(op: ast::BinaryOperator) -> Self {
+impl TryFrom<ast::BinaryOperator> for BinaryOperator {
+    type Error = TackyError;
+
+    fn try_from(op: ast::BinaryOperator) -> Result<Self, Self::Error> {
         match op {
-            ast::BinaryOperator::Add => BinaryOperator::Add,
-            ast::BinaryOperator::Sub => BinaryOperator::Sub,
-            ast::BinaryOperator::Mul => BinaryOperator::Mul,
-            ast::BinaryOperator::Div => BinaryOperator::Div,
-            ast::BinaryOperator::Mod => BinaryOperator::Mod,
-            ast::BinaryOperator::BAnd => BinaryOperator::BAnd,
-            ast::BinaryOperator::BOr => BinaryOperator::BOr,
-            ast::BinaryOperator::Xor => BinaryOperator::Xor,
-            ast::BinaryOperator::LShift => BinaryOperator::Shl,
-            ast::BinaryOperator::RShift => BinaryOperator::Shr,
-            ast::BinaryOperator::And => panic!("And operator not supported"),
-            ast::BinaryOperator::Or => panic!("Or operator not supported"),
-            ast::BinaryOperator::Eq => BinaryOperator::Eq,
-            ast::BinaryOperator::Neq => BinaryOperator::Neq,
-            ast::BinaryOperator::Lt => BinaryOperator::Lt,
-            ast::BinaryOperator::Gt => BinaryOperator::Gt,
-            ast::BinaryOperator::Le => BinaryOperator::Le,
-            ast::BinaryOperator::Ge => BinaryOperator::Ge,
+            ast::BinaryOperator::Add => Ok(BinaryOperator::Add),
+            ast::BinaryOperator::Sub => Ok(BinaryOperator::Sub),
+            ast::BinaryOperator::Mul => Ok(BinaryOperator::Mul),
+            ast::BinaryOperator::Div => Ok(BinaryOperator::Div),
+            ast::BinaryOperator::Mod => Ok(BinaryOperator::Mod),
+            ast::BinaryOperator::BAnd => Ok(BinaryOperator::BAnd),
+            ast::BinaryOperator::BOr => Ok(BinaryOperator::BOr),
+            ast::BinaryOperator::Xor => Ok(BinaryOperator::Xor),
+            ast::BinaryOperator::LShift => Ok(BinaryOperator::Shl),
+            ast::BinaryOperator::RShift => Ok(BinaryOperator::Shr),
+            ast::BinaryOperator::Eq => Ok(BinaryOperator::Eq),
+            ast::BinaryOperator::Neq => Ok(BinaryOperator::Neq),
+            ast::BinaryOperator::Lt => Ok(BinaryOperator::Lt),
+            ast::BinaryOperator::Gt => Ok(BinaryOperator::Gt),
+            ast::BinaryOperator::Le => Ok(BinaryOperator::Le),
+            ast::BinaryOperator::Ge => Ok(BinaryOperator::Ge),
+            _ => Err(TackyError::UnsupportedBinaryOperator(op)),
         }
     }
 }
@@ -383,7 +383,7 @@ impl<'a> AstVisitor<'a> for TackyEmitter<'a> {
 
                     let dst = self.make_tmp();
                     self.add_instruction(Instruction::Binary(
-                        op.into(),
+                        op.try_into()?,
                         Box::new(lhs),
                         Box::new(rhs),
                         Box::new(dst.clone()),
@@ -400,6 +400,7 @@ impl<'a> AstVisitor<'a> for TackyEmitter<'a> {
 #[derive(Debug)]
 pub enum TackyError {
     MissingValue,
+    UnsupportedBinaryOperator(ast::BinaryOperator),
 }
 
 impl fmt::Display for TackyError {
@@ -407,6 +408,9 @@ impl fmt::Display for TackyError {
         match self {
             TackyError::MissingValue => {
                 write!(f, "Missing value in statement")
+            }
+            TackyError::UnsupportedBinaryOperator(op) => {
+                write!(f, "No matching binary operator for {}", op)
             }
         }
     }
