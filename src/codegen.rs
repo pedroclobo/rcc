@@ -405,27 +405,26 @@ impl<'a> TackyVisitor<'a> for X86Emitter<'a> {
         &mut self,
         statement: crate::tacky::Instruction,
     ) -> Result<(), Self::Error> {
-        // TODO: push to vec inside
-        match statement {
+        self.instructions.extend(match statement {
             tacky::Instruction::Return(value) => {
-                self.instructions
-                    .push(Instruction::Mov(value.into(), Operand::Reg(Register::Eax)));
-                self.instructions.push(Instruction::Ret);
+                vec![
+                    Instruction::Mov(value.into(), Operand::Reg(Register::Eax)),
+                    Instruction::Ret,
+                ]
             }
             tacky::Instruction::Unary(op, src, dst) => match op {
                 tacky::UnaryOperator::Tilde | tacky::UnaryOperator::Minus => {
-                    self.instructions
-                        .push(Instruction::Mov((*src).into(), (*dst.clone()).into()));
-                    self.instructions
-                        .push(Instruction::Unary(op.into(), (*dst).into()));
+                    vec![
+                        Instruction::Mov((*src).into(), (*dst.clone()).into()),
+                        Instruction::Unary(op.into(), (*dst).into()),
+                    ]
                 }
                 tacky::UnaryOperator::Not => {
-                    self.instructions
-                        .push(Instruction::Cmp(Operand::Imm(0), (*src).into()));
-                    self.instructions
-                        .push(Instruction::Mov(Operand::Imm(0), (*dst).clone().into()));
-                    self.instructions
-                        .push(Instruction::SetCC(ConditionCode::E, (*dst).into()));
+                    vec![
+                        Instruction::Cmp(Operand::Imm(0), (*src).into()),
+                        Instruction::Mov(Operand::Imm(0), (*dst).clone().into()),
+                        Instruction::SetCC(ConditionCode::E, (*dst).into()),
+                    ]
                 }
             },
             tacky::Instruction::Binary(op, lhs, rhs, dst) => match op {
@@ -435,47 +434,42 @@ impl<'a> TackyVisitor<'a> for X86Emitter<'a> {
                 | tacky::BinaryOperator::BAnd
                 | tacky::BinaryOperator::BOr
                 | tacky::BinaryOperator::Xor => {
-                    self.instructions
-                        .push(Instruction::Mov((*lhs).into(), (*dst.clone()).into()));
-                    self.instructions.push(Instruction::Binary(
-                        op.try_into()?,
-                        (*rhs).into(),
-                        (*dst).into(),
-                    ));
+                    vec![
+                        Instruction::Mov((*lhs).into(), (*dst.clone()).into()),
+                        Instruction::Binary(op.try_into()?, (*rhs).into(), (*dst).into()),
+                    ]
                 }
                 tacky::BinaryOperator::Div | tacky::BinaryOperator::Mod => {
-                    self.instructions
-                        .push(Instruction::Mov((*lhs).into(), Operand::Reg(Register::Eax)));
-                    self.instructions.push(Instruction::Cdq);
-                    self.instructions.push(Instruction::Idiv((*rhs).into()));
+                    let mut instructions = vec![
+                        Instruction::Mov((*lhs).into(), Operand::Reg(Register::Eax)),
+                        Instruction::Cdq,
+                        Instruction::Idiv((*rhs).into()),
+                    ];
                     if matches!(op, tacky::BinaryOperator::Div) {
-                        self.instructions
+                        instructions
                             .push(Instruction::Mov(Operand::Reg(Register::Eax), (*dst).into()));
                     } else {
-                        self.instructions
+                        instructions
                             .push(Instruction::Mov(Operand::Reg(Register::Edx), (*dst).into()));
                     }
+                    instructions
                 }
                 tacky::BinaryOperator::Shl | tacky::BinaryOperator::Shr => {
-                    self.instructions
-                        .push(Instruction::Mov((*lhs).into(), Operand::Reg(Register::Eax)));
-                    self.instructions
-                        .push(Instruction::Mov((*rhs).into(), Operand::Reg(Register::Ecx)));
-                    if matches!(op, tacky::BinaryOperator::Shl) {
-                        self.instructions.push(Instruction::Binary(
-                            BinaryOperator::Shl,
-                            Operand::Reg(Register::Cl),
-                            Operand::Reg(Register::Eax),
-                        ));
+                    let binary_op = if matches!(op, tacky::BinaryOperator::Shl) {
+                        BinaryOperator::Shl
                     } else {
-                        self.instructions.push(Instruction::Binary(
-                            BinaryOperator::Sar,
+                        BinaryOperator::Sar
+                    };
+                    vec![
+                        Instruction::Mov((*lhs).into(), Operand::Reg(Register::Eax)),
+                        Instruction::Mov((*rhs).into(), Operand::Reg(Register::Ecx)),
+                        Instruction::Binary(
+                            binary_op,
                             Operand::Reg(Register::Cl),
                             Operand::Reg(Register::Eax),
-                        ));
-                    }
-                    self.instructions
-                        .push(Instruction::Mov(Operand::Reg(Register::Eax), (*dst).into()));
+                        ),
+                        Instruction::Mov(Operand::Reg(Register::Eax), (*dst).into()),
+                    ]
                 }
                 tacky::BinaryOperator::Eq
                 | tacky::BinaryOperator::Neq
@@ -483,47 +477,46 @@ impl<'a> TackyVisitor<'a> for X86Emitter<'a> {
                 | tacky::BinaryOperator::Gt
                 | tacky::BinaryOperator::Le
                 | tacky::BinaryOperator::Ge => {
-                    self.instructions
-                        .push(Instruction::Cmp((*rhs).into(), (*lhs).into()));
-                    self.instructions
-                        .push(Instruction::Mov(Operand::Imm(0), (*dst).clone().into()));
-                    self.instructions.push(Instruction::SetCC(
-                        match op {
-                            tacky::BinaryOperator::Eq => ConditionCode::E,
-                            tacky::BinaryOperator::Neq => ConditionCode::Ne,
-                            tacky::BinaryOperator::Lt => ConditionCode::Lt,
-                            tacky::BinaryOperator::Gt => ConditionCode::Gt,
-                            tacky::BinaryOperator::Le => ConditionCode::Le,
-                            tacky::BinaryOperator::Ge => ConditionCode::Ge,
-                            _ => unreachable!(),
-                        },
-                        (*dst).into(),
-                    ));
+                    vec![
+                        Instruction::Cmp((*rhs).into(), (*lhs).into()),
+                        Instruction::Mov(Operand::Imm(0), (*dst).clone().into()),
+                        Instruction::SetCC(
+                            match op {
+                                tacky::BinaryOperator::Eq => ConditionCode::E,
+                                tacky::BinaryOperator::Neq => ConditionCode::Ne,
+                                tacky::BinaryOperator::Lt => ConditionCode::Lt,
+                                tacky::BinaryOperator::Gt => ConditionCode::Gt,
+                                tacky::BinaryOperator::Le => ConditionCode::Le,
+                                tacky::BinaryOperator::Ge => ConditionCode::Ge,
+                                _ => unreachable!(),
+                            },
+                            (*dst).into(),
+                        ),
+                    ]
                 }
             },
             tacky::Instruction::Copy(src, dst) => {
-                self.instructions
-                    .push(Instruction::Mov((*src).into(), (*dst).into()));
+                vec![Instruction::Mov((*src).into(), (*dst).into())]
             }
             tacky::Instruction::Label(label) => {
-                self.instructions.push(Instruction::Label(label));
+                vec![Instruction::Label(label)]
             }
             tacky::Instruction::Jump(label) => {
-                self.instructions.push(Instruction::Jmp(label));
+                vec![Instruction::Jmp(label)]
             }
             tacky::Instruction::JumpIfZero(value, label) => {
-                self.instructions
-                    .push(Instruction::Cmp((*value).into(), Operand::Imm(0)));
-                self.instructions
-                    .push(Instruction::JmpCC(ConditionCode::E, label));
+                vec![
+                    Instruction::Cmp((*value).into(), Operand::Imm(0)),
+                    Instruction::JmpCC(ConditionCode::E, label),
+                ]
             }
             tacky::Instruction::JumpIfNotZero(value, label) => {
-                self.instructions
-                    .push(Instruction::Cmp((*value).into(), Operand::Imm(0)));
-                self.instructions
-                    .push(Instruction::JmpCC(ConditionCode::Ne, label));
+                vec![
+                    Instruction::Cmp((*value).into(), Operand::Imm(0)),
+                    Instruction::JmpCC(ConditionCode::Ne, label),
+                ]
             }
-        }
+        });
         Ok(())
     }
 
