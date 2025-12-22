@@ -1,58 +1,10 @@
-use std::{error::Error, fmt::Display, iter::Peekable, str::Chars};
+mod error;
+mod token;
 
-#[derive(Debug, Eq, PartialEq)]
-pub struct Token<'a> {
-    pub kind: TokenKind,
-    pub lexeme: &'a str,
-}
+use std::{iter::Peekable, str::Chars};
+pub use token::{Token, TokenKind};
 
-impl<'a> Token<'a> {
-    fn new(kind: TokenKind, lexeme: &'a str) -> Self {
-        Self { kind, lexeme }
-    }
-}
-
-impl<'a> Display for Token<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}(\"{}\")", self.kind, self.lexeme)
-    }
-}
-
-#[derive(Debug, Eq, PartialEq, Clone, Copy)]
-pub enum TokenKind {
-    Identifier,
-    LParen,
-    RParen,
-    Void,
-    Int,
-    LBrace,
-    RBrace,
-    Return,
-    Constant,
-    Semicolon,
-    Plus,
-    Minus,
-    Mul,
-    Div,
-    Mod,
-    Increment,
-    Decrement,
-    Tilde,
-    Ampersand,
-    Pipe,
-    Caret,
-    LShift,
-    RShift,
-    Bang,
-    And,
-    Or,
-    EqEq,
-    Neq,
-    Lt,
-    Gt,
-    Le,
-    Ge,
-}
+pub use error::LexerError;
 
 pub struct Lexer<'a> {
     input: &'a str,
@@ -274,25 +226,6 @@ impl<'a> Iterator for Lexer<'a> {
         Some(tok)
     }
 }
-
-#[derive(Debug, Clone, Copy)]
-pub enum LexerError<'a> {
-    InvalidChar(char),
-    InvalidConstant(&'a str),
-    InvalidSequence(&'a str),
-}
-
-impl Display for LexerError<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            LexerError::InvalidChar(c) => write!(f, "Invalid char: {}", c),
-            LexerError::InvalidConstant(c) => write!(f, "Invalid constant literal: {}", c),
-            LexerError::InvalidSequence(s) => write!(f, "Invalid character sequence: {}", s),
-        }
-    }
-}
-
-impl Error for LexerError<'_> {}
 
 #[cfg(test)]
 mod tests {

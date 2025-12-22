@@ -1,4 +1,5 @@
-use crate::{lexer::TokenKind, parser::ParserError};
+use super::ParserError;
+use crate::lexer::TokenKind;
 
 #[derive(Debug)]
 pub struct Program<'a> {
