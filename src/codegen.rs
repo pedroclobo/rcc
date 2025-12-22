@@ -210,25 +210,27 @@ pub enum BinaryOperator {
     Sar,
 }
 
-impl From<tacky::BinaryOperator> for BinaryOperator {
-    fn from(op: tacky::BinaryOperator) -> Self {
+impl TryFrom<tacky::BinaryOperator> for BinaryOperator {
+    type Error = X86EmitterError;
+
+    fn try_from(op: tacky::BinaryOperator) -> Result<Self, Self::Error> {
         match op {
-            tacky::BinaryOperator::Add => BinaryOperator::Add,
-            tacky::BinaryOperator::Sub => BinaryOperator::Sub,
-            tacky::BinaryOperator::Mul => BinaryOperator::Mul,
-            tacky::BinaryOperator::Div => panic!("div/mod should use `idiv`"),
-            tacky::BinaryOperator::Mod => panic!("div/mod should use `idiv`"),
-            tacky::BinaryOperator::BAnd => BinaryOperator::And,
-            tacky::BinaryOperator::BOr => BinaryOperator::Or,
-            tacky::BinaryOperator::Xor => BinaryOperator::Xor,
-            tacky::BinaryOperator::Shl => BinaryOperator::Shl,
-            tacky::BinaryOperator::Shr => BinaryOperator::Sar,
-            tacky::BinaryOperator::Eq => todo!(),
-            tacky::BinaryOperator::Neq => todo!(),
-            tacky::BinaryOperator::Lt => todo!(),
-            tacky::BinaryOperator::Gt => todo!(),
-            tacky::BinaryOperator::Le => todo!(),
-            tacky::BinaryOperator::Ge => todo!(),
+            tacky::BinaryOperator::Add => Ok(BinaryOperator::Add),
+            tacky::BinaryOperator::Sub => Ok(BinaryOperator::Sub),
+            tacky::BinaryOperator::Mul => Ok(BinaryOperator::Mul),
+            tacky::BinaryOperator::BAnd => Ok(BinaryOperator::And),
+            tacky::BinaryOperator::BOr => Ok(BinaryOperator::Or),
+            tacky::BinaryOperator::Xor => Ok(BinaryOperator::Xor),
+            tacky::BinaryOperator::Shl => Ok(BinaryOperator::Shl),
+            tacky::BinaryOperator::Shr => Ok(BinaryOperator::Sar),
+            tacky::BinaryOperator::Div
+            | tacky::BinaryOperator::Mod
+            | tacky::BinaryOperator::Eq
+            | tacky::BinaryOperator::Neq
+            | tacky::BinaryOperator::Lt
+            | tacky::BinaryOperator::Gt
+            | tacky::BinaryOperator::Le
+            | tacky::BinaryOperator::Ge => Err(X86EmitterError::UnsupportedBinaryOperator(op)),
         }
     }
 }
@@ -436,7 +438,7 @@ impl<'a> TackyVisitor<'a> for X86Emitter<'a> {
                     self.instructions
                         .push(Instruction::Mov((*lhs).into(), (*dst.clone()).into()));
                     self.instructions.push(Instruction::Binary(
-                        op.into(),
+                        op.try_into()?,
                         (*rhs).into(),
                         (*dst).into(),
                     ));
@@ -820,11 +822,17 @@ impl InstructionFixer {
 #[derive(Debug)]
 pub enum X86EmitterError {
     NoProgram,
+    UnsupportedBinaryOperator(tacky::BinaryOperator),
 }
 
 impl Display for X86EmitterError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "X86EmitterError")
+        match self {
+            X86EmitterError::NoProgram => write!(f, "No program provided"),
+            X86EmitterError::UnsupportedBinaryOperator(op) => {
+                write!(f, "No matching binary operator for {}", op)
+            }
+        }
     }
 }
 
