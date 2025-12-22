@@ -1,4 +1,4 @@
-use crate::tacky::{self, TackyVisitor};
+use crate::tacky;
 use std::{collections::HashMap, error::Error, fmt::Display};
 
 #[derive(Debug)]
@@ -120,7 +120,7 @@ impl std::fmt::Display for Instruction {
                 f,
                 "j{}\t.L{}",
                 match cc {
-                    ConditionCode::E => "e",
+                    ConditionCode::Eq => "e",
                     ConditionCode::Ne => "ne",
                     ConditionCode::Lt => "l",
                     ConditionCode::Gt => "g",
@@ -133,7 +133,7 @@ impl std::fmt::Display for Instruction {
                 f,
                 "set{}\t{}",
                 match cc {
-                    ConditionCode::E => "e",
+                    ConditionCode::Eq => "e",
                     ConditionCode::Ne => "ne",
                     ConditionCode::Lt => "l",
                     ConditionCode::Gt => "g",
@@ -149,7 +149,7 @@ impl std::fmt::Display for Instruction {
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum ConditionCode {
-    E,
+    Eq,
     Ne,
     Lt,
     Gt,
@@ -162,7 +162,7 @@ impl TryFrom<tacky::BinaryOperator> for ConditionCode {
 
     fn try_from(op: tacky::BinaryOperator) -> Result<Self, Self::Error> {
         match op {
-            tacky::BinaryOperator::Eq => Ok(ConditionCode::E),
+            tacky::BinaryOperator::Eq => Ok(ConditionCode::Eq),
             tacky::BinaryOperator::Neq => Ok(ConditionCode::Ne),
             tacky::BinaryOperator::Lt => Ok(ConditionCode::Lt),
             tacky::BinaryOperator::Gt => Ok(ConditionCode::Gt),
@@ -176,7 +176,7 @@ impl TryFrom<tacky::BinaryOperator> for ConditionCode {
 impl Display for ConditionCode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ConditionCode::E => write!(f, "e"),
+            ConditionCode::Eq => write!(f, "e"),
             ConditionCode::Ne => write!(f, "ne"),
             ConditionCode::Lt => write!(f, "lt"),
             ConditionCode::Gt => write!(f, "gt"),
@@ -188,16 +188,16 @@ impl Display for ConditionCode {
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum UnaryOperator {
-    Tilde,
-    Minus,
+    BNot,
+    Neg,
     Not,
 }
 
 impl From<tacky::UnaryOperator> for UnaryOperator {
     fn from(op: tacky::UnaryOperator) -> Self {
         match op {
-            tacky::UnaryOperator::Minus => UnaryOperator::Minus,
-            tacky::UnaryOperator::Tilde => UnaryOperator::Tilde,
+            tacky::UnaryOperator::Neg => UnaryOperator::Neg,
+            tacky::UnaryOperator::BNot => UnaryOperator::BNot,
             tacky::UnaryOperator::Not => UnaryOperator::Not,
         }
     }
@@ -206,9 +206,8 @@ impl From<tacky::UnaryOperator> for UnaryOperator {
 impl std::fmt::Display for UnaryOperator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            // TODO: better naming here
-            UnaryOperator::Minus => write!(f, "neg"),
-            UnaryOperator::Tilde => write!(f, "not"),
+            UnaryOperator::Neg => write!(f, "neg"),
+            UnaryOperator::BNot => write!(f, "not"),
             UnaryOperator::Not => write!(f, "not"),
         }
     }
@@ -351,7 +350,6 @@ pub struct X86Emitter<'a> {
     function: Option<FunctionDefinition<'a>>,
 
     instructions: Vec<Instruction>,
-    operands: Vec<Operand>,
 }
 
 impl Default for X86Emitter<'_> {
@@ -360,13 +358,12 @@ impl Default for X86Emitter<'_> {
     }
 }
 
-impl X86Emitter<'_> {
+impl<'a> X86Emitter<'a> {
     pub fn new() -> Self {
         X86Emitter {
             program: None,
             function: None,
             instructions: Vec::new(),
-            operands: Vec::new(),
         }
     }
 
@@ -379,12 +376,8 @@ impl X86Emitter<'_> {
             None
         }
     }
-}
 
-impl<'a> TackyVisitor<'a> for X86Emitter<'a> {
-    type Error = X86EmitterError;
-
-    fn visit_program(&mut self, program: tacky::Program<'a>) -> Result<(), Self::Error> {
+    pub fn visit_program(&mut self, program: tacky::Program<'a>) -> Result<(), X86EmitterError> {
         let mut functions = Vec::new();
 
         for function in program.functions {
@@ -402,9 +395,7 @@ impl<'a> TackyVisitor<'a> for X86Emitter<'a> {
     fn visit_function_definition(
         &mut self,
         function_definition: crate::tacky::FunctionDefinition<'a>,
-    ) -> Result<(), Self::Error> {
-        self.instructions.clear();
-
+    ) -> Result<(), X86EmitterError> {
         for instruction in function_definition.body {
             self.visit_instruction(instruction)?;
         }
@@ -417,10 +408,7 @@ impl<'a> TackyVisitor<'a> for X86Emitter<'a> {
         Ok(())
     }
 
-    fn visit_instruction(
-        &mut self,
-        statement: crate::tacky::Instruction,
-    ) -> Result<(), Self::Error> {
+    fn visit_instruction(&mut self, statement: tacky::Instruction) -> Result<(), X86EmitterError> {
         self.instructions.extend(match statement {
             tacky::Instruction::Return(value) => {
                 vec![
@@ -429,7 +417,7 @@ impl<'a> TackyVisitor<'a> for X86Emitter<'a> {
                 ]
             }
             tacky::Instruction::Unary(op, src, dst) => match op {
-                tacky::UnaryOperator::Tilde | tacky::UnaryOperator::Minus => {
+                tacky::UnaryOperator::BNot | tacky::UnaryOperator::Neg => {
                     vec![
                         Instruction::Mov((*src).into(), (*dst.clone()).into()),
                         Instruction::Unary(op.into(), (*dst).into()),
@@ -439,7 +427,7 @@ impl<'a> TackyVisitor<'a> for X86Emitter<'a> {
                     vec![
                         Instruction::Cmp(Operand::Imm(0), (*src).into()),
                         Instruction::Mov(Operand::Imm(0), (*dst).clone().into()),
-                        Instruction::SetCC(ConditionCode::E, (*dst).into()),
+                        Instruction::SetCC(ConditionCode::Eq, (*dst).into()),
                     ]
                 }
             },
@@ -456,31 +444,27 @@ impl<'a> TackyVisitor<'a> for X86Emitter<'a> {
                     ]
                 }
                 tacky::BinaryOperator::Div | tacky::BinaryOperator::Mod => {
-                    let mut instructions = vec![
+                    vec![
                         Instruction::Mov((*lhs).into(), Operand::Reg(Register::Eax)),
                         Instruction::Cdq,
                         Instruction::Idiv((*rhs).into()),
-                    ];
-                    if matches!(op, tacky::BinaryOperator::Div) {
-                        instructions
-                            .push(Instruction::Mov(Operand::Reg(Register::Eax), (*dst).into()));
-                    } else {
-                        instructions
-                            .push(Instruction::Mov(Operand::Reg(Register::Edx), (*dst).into()));
-                    }
-                    instructions
+                        if matches!(op, tacky::BinaryOperator::Div) {
+                            Instruction::Mov(Operand::Reg(Register::Eax), (*dst).into())
+                        } else {
+                            Instruction::Mov(Operand::Reg(Register::Edx), (*dst).into())
+                        },
+                    ]
                 }
                 tacky::BinaryOperator::Shl | tacky::BinaryOperator::Shr => {
-                    let binary_op = if matches!(op, tacky::BinaryOperator::Shl) {
-                        BinaryOperator::Shl
-                    } else {
-                        BinaryOperator::Sar
-                    };
                     vec![
                         Instruction::Mov((*lhs).into(), Operand::Reg(Register::Eax)),
                         Instruction::Mov((*rhs).into(), Operand::Reg(Register::Ecx)),
                         Instruction::Binary(
-                            binary_op,
+                            if matches!(op, tacky::BinaryOperator::Shl) {
+                                BinaryOperator::Shl
+                            } else {
+                                BinaryOperator::Sar
+                            },
                             Operand::Reg(Register::Cl),
                             Operand::Reg(Register::Eax),
                         ),
@@ -512,7 +496,7 @@ impl<'a> TackyVisitor<'a> for X86Emitter<'a> {
             tacky::Instruction::JumpIfZero(value, label) => {
                 vec![
                     Instruction::Cmp((*value).into(), Operand::Imm(0)),
-                    Instruction::JmpCC(ConditionCode::E, label),
+                    Instruction::JmpCC(ConditionCode::Eq, label),
                 ]
             }
             tacky::Instruction::JumpIfNotZero(value, label) => {
@@ -522,25 +506,9 @@ impl<'a> TackyVisitor<'a> for X86Emitter<'a> {
                 ]
             }
         });
+
         Ok(())
     }
-
-    fn visit_value(&mut self, value: crate::tacky::Value) -> Result<(), Self::Error> {
-        self.operands.push(match value {
-            tacky::Value::Constant(n) => Operand::Imm(n),
-            tacky::Value::Var(id) => Operand::PseudoReg(id),
-        });
-        Ok(())
-    }
-}
-
-pub trait X86Visitor<'a> {
-    type Error;
-
-    fn visit_program(&mut self, program: Program<'a>) -> Result<(), Self::Error>;
-    fn visit_function(&mut self, function: FunctionDefinition<'a>) -> Result<(), Self::Error>;
-    fn visit_instruction(&mut self, instruction: Instruction) -> Result<(), Self::Error>;
-    fn visit_operand(&mut self, operand: Operand) -> Result<(), Self::Error>;
 }
 
 pub struct PseudoRegisterReplacer {
@@ -638,19 +606,19 @@ impl InstructionFixer {
                 .get_mut(function.name)
                 .expect("Function not found");
 
-            instructions.push(Instruction::Push(Operand::Reg(Register::Rbp)));
-            instructions.push(Instruction::Mov(
-                Operand::Reg(Register::Rsp),
-                Operand::Reg(Register::Rbp),
-            ));
-            instructions.push(Instruction::Binary(
-                BinaryOperator::Sub,
-                Operand::Imm(offset),
-                Operand::Reg(Register::Rsp),
-            ));
+            // Preamble
+            instructions.extend(vec![
+                Instruction::Push(Operand::Reg(Register::Rbp)),
+                Instruction::Mov(Operand::Reg(Register::Rsp), Operand::Reg(Register::Rbp)),
+                Instruction::Binary(
+                    BinaryOperator::Sub,
+                    Operand::Imm(offset),
+                    Operand::Reg(Register::Rsp),
+                ),
+            ]);
 
             for instruction in &function.body {
-                match instruction {
+                instructions.extend(match instruction {
                     Instruction::Mov(
                         Operand::Stack {
                             size: src_size,
@@ -661,20 +629,22 @@ impl InstructionFixer {
                             offset: dst_offset,
                         },
                     ) => {
-                        instructions.push(Instruction::Mov(
-                            Operand::Stack {
-                                size: *src_size,
-                                offset: *src_offset,
-                            },
-                            Operand::Reg(Register::R10d),
-                        ));
-                        instructions.push(Instruction::Mov(
-                            Operand::Reg(Register::R10d),
-                            Operand::Stack {
-                                size: *dst_size,
-                                offset: *dst_offset,
-                            },
-                        ));
+                        vec![
+                            Instruction::Mov(
+                                Operand::Stack {
+                                    size: *src_size,
+                                    offset: *src_offset,
+                                },
+                                Operand::Reg(Register::R10d),
+                            ),
+                            Instruction::Mov(
+                                Operand::Reg(Register::R10d),
+                                Operand::Stack {
+                                    size: *dst_size,
+                                    offset: *dst_offset,
+                                },
+                            ),
+                        ]
                     }
                     Instruction::Cmp(
                         Operand::Stack {
@@ -686,22 +656,27 @@ impl InstructionFixer {
                             offset: dst_offset,
                         },
                     ) => {
-                        instructions.push(Instruction::Mov(
-                            Operand::Stack {
-                                size: *src_size,
-                                offset: *src_offset,
-                            },
-                            Operand::Reg(Register::R10d),
-                        ));
-                        instructions.push(Instruction::Cmp(
-                            Operand::Reg(Register::R10d),
-                            Operand::Stack {
-                                size: *dst_size,
-                                offset: *dst_offset,
-                            },
-                        ));
+                        vec![
+                            Instruction::Mov(
+                                Operand::Stack {
+                                    size: *src_size,
+                                    offset: *src_offset,
+                                },
+                                Operand::Reg(Register::R10d),
+                            ),
+                            Instruction::Cmp(
+                                Operand::Reg(Register::R10d),
+                                Operand::Stack {
+                                    size: *dst_size,
+                                    offset: *dst_offset,
+                                },
+                            ),
+                        ]
                     }
-                    Instruction::Ret => {}
+                    // Handled by postamble.
+                    Instruction::Ret => {
+                        vec![]
+                    }
                     Instruction::Binary(
                         op @ (BinaryOperator::Add
                         | BinaryOperator::Sub
@@ -717,21 +692,23 @@ impl InstructionFixer {
                             offset: rhs_offset,
                         },
                     ) => {
-                        instructions.push(Instruction::Mov(
-                            Operand::Stack {
-                                size: *lhs_size,
-                                offset: *lhs_offset,
-                            },
-                            Operand::Reg(Register::R10d),
-                        ));
-                        instructions.push(Instruction::Binary(
-                            *op,
-                            Operand::Reg(Register::R10d),
-                            Operand::Stack {
-                                size: *rhs_size,
-                                offset: *rhs_offset,
-                            },
-                        ));
+                        vec![
+                            Instruction::Mov(
+                                Operand::Stack {
+                                    size: *lhs_size,
+                                    offset: *lhs_offset,
+                                },
+                                Operand::Reg(Register::R10d),
+                            ),
+                            Instruction::Binary(
+                                *op,
+                                Operand::Reg(Register::R10d),
+                                Operand::Stack {
+                                    size: *rhs_size,
+                                    offset: *rhs_offset,
+                                },
+                            ),
+                        ]
                     }
                     Instruction::Binary(
                         BinaryOperator::Mul,
@@ -741,74 +718,73 @@ impl InstructionFixer {
                             offset: rhs_offset,
                         },
                     ) => {
-                        instructions.push(Instruction::Mov(
-                            Operand::Stack {
-                                size: *rhs_size,
-                                offset: *rhs_offset,
-                            },
-                            Operand::Reg(Register::R11d),
-                        ));
-                        instructions.push(Instruction::Binary(
-                            BinaryOperator::Mul,
-                            lhs.clone(),
-                            Operand::Reg(Register::R11d),
-                        ));
-                        instructions.push(Instruction::Mov(
-                            Operand::Reg(Register::R11d),
-                            Operand::Stack {
-                                size: *rhs_size,
-                                offset: *rhs_offset,
-                            },
-                        ));
+                        vec![
+                            Instruction::Mov(
+                                Operand::Stack {
+                                    size: *rhs_size,
+                                    offset: *rhs_offset,
+                                },
+                                Operand::Reg(Register::R11d),
+                            ),
+                            Instruction::Binary(
+                                BinaryOperator::Mul,
+                                lhs.clone(),
+                                Operand::Reg(Register::R11d),
+                            ),
+                            Instruction::Mov(
+                                Operand::Reg(Register::R11d),
+                                Operand::Stack {
+                                    size: *rhs_size,
+                                    offset: *rhs_offset,
+                                },
+                            ),
+                        ]
                     }
                     Instruction::Idiv(Operand::Imm(n)) => {
-                        instructions.push(Instruction::Mov(
-                            Operand::Imm(*n),
-                            Operand::Reg(Register::R10d),
-                        ));
-                        instructions.push(Instruction::Idiv(Operand::Reg(Register::R10d)));
+                        vec![
+                            Instruction::Mov(Operand::Imm(*n), Operand::Reg(Register::R10d)),
+                            Instruction::Idiv(Operand::Reg(Register::R10d)),
+                        ]
                     }
                     Instruction::Cmp(lhs, Operand::Imm(n)) => {
-                        instructions.push(Instruction::Mov(
-                            Operand::Imm(*n),
-                            Operand::Reg(Register::R11d),
-                        ));
-                        instructions
-                            .push(Instruction::Cmp(lhs.clone(), Operand::Reg(Register::R11d)));
+                        vec![
+                            Instruction::Mov(Operand::Imm(*n), Operand::Reg(Register::R11d)),
+                            Instruction::Cmp(lhs.clone(), Operand::Reg(Register::R11d)),
+                        ]
                     }
                     Instruction::SetCC(cc, Operand::Stack { size: _, offset }) => {
-                        instructions.push(Instruction::SetCC(
+                        vec![Instruction::SetCC(
                             *cc,
                             Operand::Stack {
                                 size: 1,
                                 offset: *offset,
                             },
-                        ));
+                        )]
                     }
                     Instruction::SetCC(cc, Operand::Reg(reg)) => {
-                        match reg {
-                            Register::Eax => instructions
-                                .push(Instruction::SetCC(*cc, Operand::Reg(Register::Al))),
-                            Register::Edx => instructions
-                                .push(Instruction::SetCC(*cc, Operand::Reg(Register::Dl))),
-                            Register::R10d => instructions
-                                .push(Instruction::SetCC(*cc, Operand::Reg(Register::R10b))),
-                            Register::R11d => instructions
-                                .push(Instruction::SetCC(*cc, Operand::Reg(Register::R11b))),
-                            _ => unreachable!(),
-                        }
+                        vec![Instruction::SetCC(
+                            *cc,
+                            match reg {
+                                Register::Eax => Operand::Reg(Register::Al),
+                                Register::Edx => Operand::Reg(Register::Dl),
+                                Register::R10d => Operand::Reg(Register::R10b),
+                                Register::R11d => Operand::Reg(Register::R11b),
+                                reg => Operand::Reg(*reg),
+                            },
+                        )]
                     }
                     _ => {
-                        instructions.push(instruction.clone());
+                        vec![instruction.clone()]
                     }
-                }
+                })
             }
-            instructions.push(Instruction::Mov(
-                Operand::Reg(Register::Rbp),
-                Operand::Reg(Register::Rsp),
-            ));
-            instructions.push(Instruction::Pop(Operand::Reg(Register::Rbp)));
-            instructions.push(Instruction::Ret);
+
+            // Postamble
+            instructions.extend(vec![
+                Instruction::Mov(Operand::Reg(Register::Rbp), Operand::Reg(Register::Rsp)),
+                Instruction::Pop(Operand::Reg(Register::Rbp)),
+                Instruction::Ret,
+            ])
         }
     }
 

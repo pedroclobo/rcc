@@ -201,8 +201,8 @@ impl<'a> Parser<'a> {
         let tok = self.expect_any(&[TokenKind::Minus, TokenKind::Tilde, TokenKind::Bang])?;
 
         let op = match tok.kind {
-            TokenKind::Minus => UnaryOperator::Minus,
-            TokenKind::Tilde => UnaryOperator::Tilde,
+            TokenKind::Minus => UnaryOperator::Neg,
+            TokenKind::Tilde => UnaryOperator::BNot,
             TokenKind::Bang => UnaryOperator::Not,
             _ => return Err(ParserError::InvalidUnaryOperator(tok.kind)),
         };
@@ -299,7 +299,7 @@ mod tests {
         assert_eq!(
             ast.functions[0].body,
             Statement::Return(Expression::Unary(
-                UnaryOperator::Minus,
+                UnaryOperator::Neg,
                 Box::new(Expression::Constant(2))
             ))
         );
@@ -315,7 +315,7 @@ mod tests {
         assert_eq!(
             ast.functions[0].body,
             Statement::Return(Expression::Unary(
-                UnaryOperator::Tilde,
+                UnaryOperator::BNot,
                 Box::new(Expression::Constant(2))
             ))
         );
@@ -331,9 +331,9 @@ mod tests {
         assert_eq!(
             ast.functions[0].body,
             Statement::Return(Expression::Unary(
-                UnaryOperator::Tilde,
+                UnaryOperator::BNot,
                 Box::new(Expression::Unary(
-                    UnaryOperator::Minus,
+                    UnaryOperator::Neg,
                     Box::new(Expression::Constant(2))
                 ))
             ))

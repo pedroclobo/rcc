@@ -18,8 +18,8 @@ pub enum Statement {
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum UnaryOperator {
-    Tilde,
-    Minus,
+    BNot,
+    Neg,
     Not,
 }
 
@@ -103,16 +103,4 @@ pub enum Expression {
     Constant(i32),
     Unary(UnaryOperator, Box<Expression>),
     Binary(BinaryOperator, Box<Expression>, Box<Expression>),
-}
-
-pub trait AstVisitor<'a> {
-    type Error;
-
-    fn visit_program(&mut self, program: Program<'a>) -> Result<(), Self::Error>;
-    fn visit_function_definition(
-        &mut self,
-        function_definition: FunctionDefinition<'a>,
-    ) -> Result<(), Self::Error>;
-    fn visit_statement(&mut self, statement: Statement) -> Result<(), Self::Error>;
-    fn visit_expression(&mut self, expression: Expression) -> Result<(), Self::Error>;
 }

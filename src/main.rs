@@ -1,10 +1,9 @@
 use clap::Parser;
 use rcc::{
-    ast::AstVisitor,
     codegen::{X86Emitter, X86EmitterError},
     lexer::{Lexer, LexerError},
     parser::ParserError,
-    tacky::{TackyEmitter, TackyError, TackyVisitor},
+    tacky::{TackyEmitter, TackyError},
 };
 use std::io::Write;
 use std::{error::Error, fmt::Display, fs::File, path::PathBuf, process::Command};
