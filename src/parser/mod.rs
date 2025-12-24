@@ -1,7 +1,10 @@
 mod ast;
 mod error;
 
-pub use ast::{BinaryOperator, Expression, FunctionDefinition, Program, Statement, UnaryOperator};
+pub use ast::{
+    BinaryOperator, BlockItem, Declaration, Expression, FunctionDefinition, Program, Statement,
+    UnaryOperator,
+};
 pub use error::ParserError;
 
 use crate::lexer::{Lexer, Token, TokenKind};
@@ -11,6 +14,7 @@ use std::iter::Peekable;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Precedence {
     None,
+    Assignment,     // =
     LogicalOr,      // ||
     LogicalAnd,     // &&
     BitwiseOr,      // |
@@ -51,7 +55,8 @@ fn is_binop(token: &Token) -> bool {
 impl Precedence {
     fn increment(self) -> Self {
         match self {
-            Precedence::None => Precedence::LogicalOr,
+            Precedence::None => Precedence::Assignment,
+            Precedence::Assignment => Precedence::LogicalOr,
             Precedence::LogicalOr => Precedence::LogicalAnd,
             Precedence::LogicalAnd => Precedence::BitwiseOr,
             Precedence::BitwiseOr => Precedence::BitwiseXor,
@@ -104,7 +109,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // <function> ::= "int" <identifier> "(" "void" ")" "{" <statement> "}"
+    // <function> ::= "int" <identifier> "(" "void" ")" "{" { <body_item> } "}"
     fn parse_function_definition(&mut self) -> Result<FunctionDefinition<'a>, ParserError<'a>> {
         self.expect(TokenKind::Int)?;
 
@@ -115,20 +120,86 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::RParen)?;
 
         self.expect(TokenKind::LBrace)?;
-        let body = self.parse_statement()?;
+        let mut body = Vec::new();
+        while let Some(Ok(tok)) = self.lexer.peek() {
+            match tok.kind {
+                TokenKind::RBrace => break,
+                _ => body.push(self.parse_body_item()?),
+            }
+        }
         self.expect(TokenKind::RBrace)?;
 
         Ok(FunctionDefinition { name, body })
     }
 
-    // <statement> ::= "return" <exp> ";"
+    // <body_item> ::= <statement> | <declaration>
+    fn parse_body_item(&mut self) -> Result<BlockItem, ParserError<'a>> {
+        let tok = match self.lexer.peek() {
+            Some(Ok(tok)) => tok,
+            Some(Err(e)) => return Err(ParserError::LexerError(*e)),
+            None => return Err(ParserError::NoMoreTokens),
+        };
+
+        match tok.kind {
+            TokenKind::Int => Ok(BlockItem::Declaration(self.parse_declaration()?)),
+            _ => Ok(BlockItem::Statement(self.parse_statement()?)),
+        }
+    }
+
+    // <declaration> :: "int" <identifier> [ "=" <exp> ] ";"
+    fn parse_declaration(&mut self) -> Result<Declaration, ParserError<'a>> {
+        self.expect(TokenKind::Int)?;
+
+        let name = self.expect(TokenKind::Identifier)?.lexeme.to_string();
+
+        let tok = match self.lexer.peek() {
+            Some(Ok(tok)) => tok,
+            Some(Err(e)) => return Err(ParserError::LexerError(*e)),
+            None => return Err(ParserError::NoMoreTokens),
+        };
+        match tok.kind {
+            TokenKind::Eq => {
+                self.expect(TokenKind::Eq)?;
+                let initializer = Some(self.parse_expression(Precedence::None)?);
+                self.expect(TokenKind::Semicolon)?;
+
+                Ok(Declaration { name, initializer })
+            }
+            _ => {
+                self.expect(TokenKind::Semicolon)?;
+                Ok(Declaration {
+                    name,
+                    initializer: None,
+                })
+            }
+        }
+    }
+
+    // <statement> ::= "return" <exp> ";" | <exp> ";" |  ";"
     fn parse_statement(&mut self) -> Result<Statement, ParserError<'a>> {
-        self.expect(TokenKind::Return)?;
-        let expr = self.parse_expression(Precedence::None)?;
+        let tok = match self.lexer.peek() {
+            Some(Ok(tok)) => tok,
+            Some(Err(e)) => return Err(ParserError::LexerError(*e)),
+            None => return Err(ParserError::NoMoreTokens),
+        };
 
-        self.expect(TokenKind::Semicolon)?;
-
-        Ok(Statement::Return(expr))
+        match tok.kind {
+            TokenKind::Return => {
+                self.expect(TokenKind::Return)?;
+                let expr = self.parse_expression(Precedence::None)?;
+                self.expect(TokenKind::Semicolon)?;
+                Ok(Statement::Return(expr))
+            }
+            TokenKind::Semicolon => {
+                self.expect(TokenKind::Semicolon)?;
+                Ok(Statement::Expression(None))
+            }
+            _ => {
+                let expr = self.parse_expression(Precedence::None)?;
+                self.expect(TokenKind::Semicolon)?;
+                Ok(Statement::Expression(Some(expr)))
+            }
+        }
     }
 
     fn precedence(token: &Token) -> Precedence {
@@ -143,6 +214,7 @@ impl<'a> Parser<'a> {
             TokenKind::Pipe => Precedence::BitwiseOr,
             TokenKind::And => Precedence::LogicalAnd,
             TokenKind::Or => Precedence::LogicalOr,
+            TokenKind::Eq => Precedence::Assignment,
             _ => Precedence::None,
         }
     }
@@ -153,19 +225,30 @@ impl<'a> Parser<'a> {
         let mut lhs = self.parse_factor()?;
         while let Some(Ok(token)) = self.lexer.peek()
             && Self::precedence(token) >= precedence
-            && is_binop(token)
+            && (is_binop(token) || matches!(token.kind, TokenKind::Eq))
         {
-            let op = BinaryOperator::try_from(token.kind)?;
-            let precedence = Self::precedence(token);
-            self.lexer.next();
+            match token.kind {
+                TokenKind::Eq => {
+                    let precedence = Self::precedence(token);
+                    self.lexer.next();
 
-            let rhs = self.parse_expression(precedence.increment())?;
-            lhs = Expression::Binary(op, Box::new(lhs), Box::new(rhs));
+                    let rhs = self.parse_expression(precedence)?;
+                    lhs = Expression::Assignment(Box::new(lhs), Box::new(rhs));
+                }
+                _ => {
+                    let op = BinaryOperator::try_from(token.kind)?;
+                    let precedence = Self::precedence(token);
+                    self.lexer.next();
+
+                    let rhs = self.parse_expression(precedence.increment())?;
+                    lhs = Expression::Binary(op, Box::new(lhs), Box::new(rhs));
+                }
+            }
         }
         Ok(lhs)
     }
 
-    // <factor> ::= constant | "(" <exp> ")" | <unexp>
+    // <factor> ::= constant | <identifier> | "(" <exp> ")" | <unexp>
     fn parse_factor(&mut self) -> Result<Expression, ParserError<'a>> {
         let tok = match self.lexer.peek() {
             Some(Ok(tok)) => tok,
@@ -177,6 +260,10 @@ impl<'a> Parser<'a> {
             TokenKind::Constant => {
                 let constant = self.expect(TokenKind::Constant)?;
                 Ok(Expression::Constant(constant.lexeme.parse()?))
+            }
+            TokenKind::Identifier => {
+                let identifier = self.expect(TokenKind::Identifier)?.lexeme.to_string();
+                Ok(Expression::Var(identifier))
             }
             TokenKind::LParen => {
                 self.expect(TokenKind::LParen)?;
@@ -228,7 +315,9 @@ mod tests {
         assert_eq!(ast.functions[0].name, "main");
         assert_eq!(
             ast.functions[0].body,
-            Statement::Return(Expression::Constant(0))
+            vec![BlockItem::Statement(Statement::Return(
+                Expression::Constant(0)
+            ))]
         );
     }
 
@@ -241,7 +330,9 @@ mod tests {
         assert_eq!(ast.functions[0].name, "main");
         assert_eq!(
             ast.functions[0].body,
-            Statement::Return(Expression::Constant(2))
+            vec![BlockItem::Statement(Statement::Return(
+                Expression::Constant(2)
+            ))]
         );
     }
 
@@ -254,10 +345,10 @@ mod tests {
         assert_eq!(ast.functions[0].name, "main");
         assert_eq!(
             ast.functions[0].body,
-            Statement::Return(Expression::Unary(
+            vec![BlockItem::Statement(Statement::Return(Expression::Unary(
                 UnaryOperator::Neg,
                 Box::new(Expression::Constant(2))
-            ))
+            )))]
         );
     }
 
@@ -270,10 +361,10 @@ mod tests {
         assert_eq!(ast.functions[0].name, "main");
         assert_eq!(
             ast.functions[0].body,
-            Statement::Return(Expression::Unary(
+            vec![BlockItem::Statement(Statement::Return(Expression::Unary(
                 UnaryOperator::BNot,
                 Box::new(Expression::Constant(2))
-            ))
+            )))]
         );
     }
 
@@ -286,13 +377,13 @@ mod tests {
         assert_eq!(ast.functions[0].name, "main");
         assert_eq!(
             ast.functions[0].body,
-            Statement::Return(Expression::Unary(
+            vec![BlockItem::Statement(Statement::Return(Expression::Unary(
                 UnaryOperator::BNot,
                 Box::new(Expression::Unary(
                     UnaryOperator::Neg,
                     Box::new(Expression::Constant(2))
                 ))
-            ))
+            )))]
         );
     }
 
@@ -392,6 +483,55 @@ mod tests {
         assert_eq!(
             expr,
             Expression::Unary(UnaryOperator::Not, Box::new(Expression::Constant(1)))
+        );
+    }
+
+    #[test]
+    fn declaration() {
+        let mut parser = Parser::new("int i;");
+        let decl = parser.parse_declaration().unwrap();
+
+        assert_eq!(
+            decl,
+            Declaration {
+                name: "i".to_string(),
+                initializer: None
+            }
+        );
+    }
+
+    #[test]
+    fn declaration_with_initializer() {
+        let mut parser = Parser::new("int i = 3 + 1;");
+        let decl = parser.parse_declaration().unwrap();
+
+        assert_eq!(
+            decl,
+            Declaration {
+                name: "i".to_string(),
+                initializer: Some(Expression::Binary(
+                    BinaryOperator::Add,
+                    Box::new(Expression::Constant(3)),
+                    Box::new(Expression::Constant(1))
+                ))
+            }
+        );
+    }
+
+    #[test]
+    fn assignment_precedence() {
+        let mut parser = Parser::new("a = b = 3");
+        let expr = parser.parse_expression(Precedence::None).unwrap();
+
+        assert_eq!(
+            expr,
+            Expression::Assignment(
+                Box::new(Expression::Var("a".to_string())),
+                Box::new(Expression::Assignment(
+                    Box::new(Expression::Var("b".to_string())),
+                    Box::new(Expression::Constant(3))
+                ))
+            )
         );
     }
 }

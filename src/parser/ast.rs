@@ -9,12 +9,25 @@ pub struct Program<'a> {
 #[derive(Debug)]
 pub struct FunctionDefinition<'a> {
     pub name: &'a str,
-    pub body: Statement,
+    pub body: Vec<BlockItem>,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
+pub enum BlockItem {
+    Declaration(Declaration),
+    Statement(Statement),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Declaration {
+    pub name: String,
+    pub initializer: Option<Expression>,
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Statement {
     Return(Expression),
+    Expression(Option<Expression>),
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
@@ -102,6 +115,8 @@ impl std::fmt::Display for BinaryOperator {
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Expression {
     Constant(i32),
+    Var(String),
     Unary(UnaryOperator, Box<Expression>),
     Binary(BinaryOperator, Box<Expression>, Box<Expression>),
+    Assignment(Box<Expression>, Box<Expression>),
 }

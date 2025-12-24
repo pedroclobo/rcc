@@ -11,6 +11,7 @@ pub enum ParserError<'a> {
     ParseIntError(ParseIntError),
     InvalidUnaryOperator(TokenKind),
     InvalidBinaryOperator(TokenKind),
+    InvalidBody(TokenKind),
 }
 
 impl std::fmt::Display for ParserError<'_> {
@@ -29,6 +30,7 @@ impl std::fmt::Display for ParserError<'_> {
             ParserError::InvalidBinaryOperator(op) => {
                 write!(f, "Invalid binary operator: {:?}", op)
             }
+            ParserError::InvalidBody(tok) => write!(f, "Invalid function body: found {:?}", tok),
         }
     }
 }

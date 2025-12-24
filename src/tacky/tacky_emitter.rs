@@ -58,7 +58,26 @@ impl<'a> TackyEmitter<'a> {
         &mut self,
         function_definition: parser::FunctionDefinition<'a>,
     ) -> Result<(), TackyError> {
-        self.visit_statement(function_definition.body)?;
+        let mut has_return = false;
+        for item in &function_definition.body {
+            if let parser::BlockItem::Statement(parser::Statement::Return(_)) = item {
+                has_return = true;
+            }
+        }
+
+        for item in function_definition.body {
+            match item {
+                parser::BlockItem::Declaration(declaration) => {
+                    self.visit_declaration(declaration)?
+                }
+                parser::BlockItem::Statement(statement) => self.visit_statement(statement)?,
+            }
+        }
+
+        if function_definition.name == "main" && !has_return {
+            self.instructions
+                .push(Instruction::Return(Value::Constant(0)));
+        }
 
         self.function = Some(FunctionDefinition {
             name: function_definition.name,
@@ -68,11 +87,28 @@ impl<'a> TackyEmitter<'a> {
         Ok(())
     }
 
+    fn visit_declaration(&mut self, declaration: parser::Declaration) -> Result<(), TackyError> {
+        if let Some(initializer) = declaration.initializer {
+            let expr = self.visit_expression(initializer)?;
+            self.instructions.push(Instruction::Copy(
+                Box::new(expr),
+                Box::new(Value::Var(declaration.name)),
+            ));
+        }
+
+        Ok(())
+    }
+
     fn visit_statement(&mut self, statement: parser::Statement) -> Result<(), TackyError> {
         match statement {
             parser::Statement::Return(expression) => {
                 let expr = self.visit_expression(expression)?;
                 self.instructions.push(Instruction::Return(expr));
+            }
+            parser::Statement::Expression(expression) => {
+                if let Some(expression) = expression {
+                    self.visit_expression(expression)?;
+                }
             }
         };
 
@@ -161,6 +197,16 @@ impl<'a> TackyEmitter<'a> {
                 ));
 
                 Ok(dst)
+            }
+            parser::Expression::Var(name) => Ok(Value::Var(name)),
+            parser::Expression::Assignment(lhs, rhs) => {
+                let lhs = self.visit_expression(*lhs)?;
+                let rhs = self.visit_expression(*rhs)?;
+
+                self.instructions
+                    .push(Instruction::Copy(Box::new(rhs), Box::new(lhs.clone())));
+
+                Ok(lhs)
             }
         }
     }

@@ -111,7 +111,7 @@ impl<'a> Lexer<'a> {
     fn consume_identifier(&mut self) -> &'a str {
         let start = self.idx - 1;
         while let Some(&d) = self.peek_char() {
-            if d.is_alphanumeric() {
+            if d.is_alphanumeric() || d == '_' {
                 self.next_char();
             } else {
                 break;
@@ -205,7 +205,7 @@ impl<'a> Iterator for Lexer<'a> {
                     self.next_char();
                     Ok(Token::new(TokenKind::EqEq, "=="))
                 } else {
-                    todo!()
+                    Ok(Token::new(TokenKind::Eq, "="))
                 }
             }
 
@@ -342,5 +342,10 @@ mod tests {
                 tok(TokenKind::Ge, ">="),
             ]
         );
+    }
+
+    #[test]
+    fn assignment() {
+        assert_eq!(lex("=").unwrap(), vec![tok(TokenKind::Eq, "="),]);
     }
 }

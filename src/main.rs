@@ -3,6 +3,7 @@ use rcc::{
     codegen::{X86Emitter, X86EmitterError},
     lexer::{Lexer, LexerError},
     parser::ParserError,
+    sema::SemaError,
     tacky::{TackyEmitter, TackyError},
 };
 use std::io::Write;
@@ -15,19 +16,23 @@ struct Args {
     c_file: PathBuf,
 
     /// Stop after lexing
-    #[arg(long, conflicts_with_all = ["parse", "tacky", "codegen"])]
+    #[arg(long, conflicts_with_all = ["parse", "tacky", "codegen", "validate"])]
     lex: bool,
 
     /// Stop after parsing
-    #[arg(long, conflicts_with_all = ["lex", "tacky", "codegen"])]
+    #[arg(long, conflicts_with_all = ["lex", "tacky", "codegen", "validate"])]
     parse: bool,
 
+    /// Stop after semantic analysis
+    #[arg(long, conflicts_with_all = ["lex", "parse", "tacky", "codegen"])]
+    validate: bool,
+
     /// Stop after TACKY emission
-    #[arg(long, conflicts_with_all = ["lex", "parse", "codegen"])]
+    #[arg(long, conflicts_with_all = ["lex", "parse", "codegen", "validate"])]
     tacky: bool,
 
     /// Stop after codegen
-    #[arg(long, conflicts_with_all = ["lex", "parse", "tacky"])]
+    #[arg(long, conflicts_with_all = ["lex", "parse", "tacky", "validate"])]
     codegen: bool,
 
     /// Output file
@@ -75,8 +80,15 @@ fn run<'a>(
         return Ok(());
     }
 
-    let ast = rcc::parser::Parser::new(prog).parse()?;
+    let mut ast = rcc::parser::Parser::new(prog).parse()?;
     if args.parse {
+        println!("{:?}", ast);
+        return Ok(());
+    }
+
+    let mut sema = rcc::sema::VariableResolver::new();
+    sema.run(&mut ast)?;
+    if args.validate {
         println!("{:?}", ast);
         return Ok(());
     }
@@ -122,8 +134,9 @@ enum CompileError<'a> {
     Io(std::io::Error),
     Lexer(LexerError<'a>),
     Parser(ParserError<'a>),
-    CodeGen(X86EmitterError),
+    Sema(SemaError),
     Tacky(TackyError),
+    CodeGen(X86EmitterError),
     Linker,
 }
 
@@ -157,6 +170,12 @@ impl From<TackyError> for CompileError<'_> {
     }
 }
 
+impl From<SemaError> for CompileError<'_> {
+    fn from(e: SemaError) -> Self {
+        CompileError::Sema(e)
+    }
+}
+
 impl Error for CompileError<'_> {}
 
 impl Display for CompileError<'_> {
@@ -165,8 +184,9 @@ impl Display for CompileError<'_> {
             CompileError::Io(e) => e.fmt(f),
             CompileError::Lexer(e) => e.fmt(f),
             CompileError::Parser(e) => e.fmt(f),
-            CompileError::CodeGen(e) => e.fmt(f),
+            CompileError::Sema(e) => e.fmt(f),
             CompileError::Tacky(e) => e.fmt(f),
+            CompileError::CodeGen(e) => e.fmt(f),
             CompileError::Linker => write!(f, "Error linking program"),
         }
     }

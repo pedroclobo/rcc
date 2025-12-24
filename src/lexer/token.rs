@@ -50,4 +50,5 @@ pub enum TokenKind {
     Gt,
     Le,
     Ge,
+    Eq,
 }
