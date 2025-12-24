@@ -160,7 +160,7 @@ impl<'a> Parser<'a> {
         match tok.kind {
             TokenKind::Eq => {
                 self.expect(TokenKind::Eq)?;
-                let initializer = Some(self.parse_expression(Precedence::None)?);
+                let initializer = Some(self.parse_expression()?);
                 self.expect(TokenKind::Semicolon)?;
 
                 Ok(Declaration { name, initializer })
@@ -186,7 +186,7 @@ impl<'a> Parser<'a> {
         match tok.kind {
             TokenKind::Return => {
                 self.expect(TokenKind::Return)?;
-                let expr = self.parse_expression(Precedence::None)?;
+                let expr = self.parse_expression()?;
                 self.expect(TokenKind::Semicolon)?;
                 Ok(Statement::Return(expr))
             }
@@ -195,7 +195,7 @@ impl<'a> Parser<'a> {
                 Ok(Statement::Expression(None))
             }
             _ => {
-                let expr = self.parse_expression(Precedence::None)?;
+                let expr = self.parse_expression()?;
                 self.expect(TokenKind::Semicolon)?;
                 Ok(Statement::Expression(Some(expr)))
             }
@@ -221,7 +221,11 @@ impl<'a> Parser<'a> {
 
     // <exp> ::= <factor> | <binexp>
     // <binexp> ::= <factor> <binop> <factor>
-    fn parse_expression(&mut self, precedence: Precedence) -> Result<Expression, ParserError<'a>> {
+    fn parse_expression(&mut self) -> Result<Expression, ParserError<'a>> {
+        self._parse_expression(Precedence::None)
+    }
+
+    fn _parse_expression(&mut self, precedence: Precedence) -> Result<Expression, ParserError<'a>> {
         let mut lhs = self.parse_factor()?;
         while let Some(Ok(token)) = self.lexer.peek()
             && Self::precedence(token) >= precedence
@@ -232,7 +236,7 @@ impl<'a> Parser<'a> {
                     let precedence = Self::precedence(token);
                     self.lexer.next();
 
-                    let rhs = self.parse_expression(precedence)?;
+                    let rhs = self._parse_expression(precedence)?;
                     lhs = Expression::Assignment(Box::new(lhs), Box::new(rhs));
                 }
                 _ => {
@@ -240,7 +244,7 @@ impl<'a> Parser<'a> {
                     let precedence = Self::precedence(token);
                     self.lexer.next();
 
-                    let rhs = self.parse_expression(precedence.increment())?;
+                    let rhs = self._parse_expression(precedence.increment())?;
                     lhs = Expression::Binary(op, Box::new(lhs), Box::new(rhs));
                 }
             }
@@ -267,7 +271,7 @@ impl<'a> Parser<'a> {
             }
             TokenKind::LParen => {
                 self.expect(TokenKind::LParen)?;
-                let expr = self.parse_expression(Precedence::None)?;
+                let expr = self.parse_expression()?;
                 self.expect(TokenKind::RParen)?;
                 Ok(expr)
             }
@@ -390,7 +394,7 @@ mod tests {
     #[test]
     fn left_associativity() {
         let mut parser = Parser::new("1 + 2 - 3");
-        let expr = parser.parse_expression(Precedence::None).unwrap();
+        let expr = parser.parse_expression().unwrap();
 
         assert_eq!(
             expr,
@@ -409,7 +413,7 @@ mod tests {
     #[test]
     fn precedence() {
         let mut parser = Parser::new("1 + 2 * 3");
-        let expr = parser.parse_expression(Precedence::None).unwrap();
+        let expr = parser.parse_expression().unwrap();
 
         assert_eq!(
             expr,
@@ -428,7 +432,7 @@ mod tests {
     #[test]
     fn bitwise() {
         let mut parser = Parser::new("1 << 2 & 3 ^ 4 | 5");
-        let expr = parser.parse_expression(Precedence::None).unwrap();
+        let expr = parser.parse_expression().unwrap();
 
         assert_eq!(
             expr,
@@ -455,7 +459,7 @@ mod tests {
     #[test]
     fn logical_and_comparison() {
         let mut parser = Parser::new("1 < 2 && 3 || 4");
-        let expr = parser.parse_expression(Precedence::None).unwrap();
+        let expr = parser.parse_expression().unwrap();
 
         assert_eq!(
             expr,
@@ -478,7 +482,7 @@ mod tests {
     #[test]
     fn bang() {
         let mut parser = Parser::new("!1");
-        let expr = parser.parse_expression(Precedence::None).unwrap();
+        let expr = parser.parse_expression().unwrap();
 
         assert_eq!(
             expr,
@@ -521,7 +525,7 @@ mod tests {
     #[test]
     fn assignment_precedence() {
         let mut parser = Parser::new("a = b = 3");
-        let expr = parser.parse_expression(Precedence::None).unwrap();
+        let expr = parser.parse_expression().unwrap();
 
         assert_eq!(
             expr,
