@@ -109,6 +109,14 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn peek(&mut self) -> Result<&Token<'a>, ParserError<'a>> {
+        match self.lexer.peek() {
+            Some(Ok(tok)) => Ok(tok),
+            Some(Err(e)) => Err(ParserError::LexerError(*e)),
+            None => Err(ParserError::NoMoreTokens),
+        }
+    }
+
     // <function> ::= "int" <identifier> "(" "void" ")" "{" { <body_item> } "}"
     fn parse_function_definition(&mut self) -> Result<FunctionDefinition<'a>, ParserError<'a>> {
         self.expect(TokenKind::Int)?;
@@ -121,7 +129,7 @@ impl<'a> Parser<'a> {
 
         self.expect(TokenKind::LBrace)?;
         let mut body = Vec::new();
-        while let Some(Ok(tok)) = self.lexer.peek() {
+        while let Ok(tok) = self.peek() {
             match tok.kind {
                 TokenKind::RBrace => break,
                 _ => body.push(self.parse_body_item()?),
@@ -134,13 +142,7 @@ impl<'a> Parser<'a> {
 
     // <body_item> ::= <statement> | <declaration>
     fn parse_body_item(&mut self) -> Result<BlockItem, ParserError<'a>> {
-        let tok = match self.lexer.peek() {
-            Some(Ok(tok)) => tok,
-            Some(Err(e)) => return Err(ParserError::LexerError(*e)),
-            None => return Err(ParserError::NoMoreTokens),
-        };
-
-        match tok.kind {
+        match self.peek()?.kind {
             TokenKind::Int => Ok(BlockItem::Declaration(self.parse_declaration()?)),
             _ => Ok(BlockItem::Statement(self.parse_statement()?)),
         }
@@ -151,13 +153,7 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::Int)?;
 
         let name = self.expect(TokenKind::Identifier)?.lexeme.to_string();
-
-        let tok = match self.lexer.peek() {
-            Some(Ok(tok)) => tok,
-            Some(Err(e)) => return Err(ParserError::LexerError(*e)),
-            None => return Err(ParserError::NoMoreTokens),
-        };
-        match tok.kind {
+        match self.peek()?.kind {
             TokenKind::Eq => {
                 self.expect(TokenKind::Eq)?;
                 let initializer = Some(self.parse_expression()?);
@@ -177,13 +173,7 @@ impl<'a> Parser<'a> {
 
     // <statement> ::= "return" <exp> ";" | <exp> ";" |  ";"
     fn parse_statement(&mut self) -> Result<Statement, ParserError<'a>> {
-        let tok = match self.lexer.peek() {
-            Some(Ok(tok)) => tok,
-            Some(Err(e)) => return Err(ParserError::LexerError(*e)),
-            None => return Err(ParserError::NoMoreTokens),
-        };
-
-        match tok.kind {
+        match self.peek()?.kind {
             TokenKind::Return => {
                 self.expect(TokenKind::Return)?;
                 let expr = self.parse_expression()?;
@@ -227,7 +217,7 @@ impl<'a> Parser<'a> {
 
     fn _parse_expression(&mut self, precedence: Precedence) -> Result<Expression, ParserError<'a>> {
         let mut lhs = self.parse_factor()?;
-        while let Some(Ok(token)) = self.lexer.peek()
+        while let Ok(token) = self.peek()
             && Self::precedence(token) >= precedence
             && (is_binop(token) || matches!(token.kind, TokenKind::Eq))
         {
@@ -254,12 +244,7 @@ impl<'a> Parser<'a> {
 
     // <factor> ::= constant | <identifier> | "(" <exp> ")" | <unexp>
     fn parse_factor(&mut self) -> Result<Expression, ParserError<'a>> {
-        let tok = match self.lexer.peek() {
-            Some(Ok(tok)) => tok,
-            Some(Err(e)) => return Err(ParserError::LexerError(*e)),
-            None => return Err(ParserError::NoMoreTokens),
-        };
-
+        let tok = self.peek()?;
         match tok.kind {
             TokenKind::Constant => {
                 let constant = self.expect(TokenKind::Constant)?;
