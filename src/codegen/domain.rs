@@ -168,7 +168,7 @@ impl TryFrom<tacky::BinaryOperator> for ConditionCode {
             tacky::BinaryOperator::Gt => Ok(ConditionCode::Gt),
             tacky::BinaryOperator::Le => Ok(ConditionCode::Le),
             tacky::BinaryOperator::Ge => Ok(ConditionCode::Ge),
-            _ => Err(X86EmitterError::NoMatchingConditionCode(op)),
+            _ => Err(X86EmitterError::NoMatchingConditionCode { op }),
         }
     }
 }
@@ -245,7 +245,7 @@ impl TryFrom<tacky::BinaryOperator> for BinaryOperator {
             | tacky::BinaryOperator::Lt
             | tacky::BinaryOperator::Gt
             | tacky::BinaryOperator::Le
-            | tacky::BinaryOperator::Ge => Err(X86EmitterError::UnsupportedBinaryOperator(op)),
+            | tacky::BinaryOperator::Ge => Err(X86EmitterError::UnsupportedBinaryOperator { op }),
         }
     }
 }

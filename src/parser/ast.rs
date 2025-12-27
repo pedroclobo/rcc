@@ -1,5 +1,25 @@
+use miette::SourceSpan;
+
 use super::ParserError;
-use crate::lexer::TokenKind;
+use crate::lexer::{Token, TokenKind};
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub struct Span {
+    pub start: usize,
+    pub end: usize,
+}
+
+impl Span {
+    pub fn new(start: usize, end: usize) -> Self {
+        Self { start, end }
+    }
+}
+
+impl Into<SourceSpan> for Span {
+    fn into(self) -> SourceSpan {
+        SourceSpan::new(self.start.into(), self.end - self.start)
+    }
+}
 
 #[derive(Debug)]
 pub struct Program<'a> {
@@ -12,22 +32,62 @@ pub struct FunctionDefinition<'a> {
     pub body: Vec<BlockItem>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum BlockItem {
-    Declaration(Declaration),
-    Statement(Statement),
+    Decl(Decl),
+    Stmt(Stmt),
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub struct Declaration {
-    pub name: String,
-    pub initializer: Option<Expression>,
+impl PartialEq for BlockItem {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (BlockItem::Decl(a), BlockItem::Decl(b)) => a == b,
+            (BlockItem::Stmt(a), BlockItem::Stmt(b)) => a == b,
+            _ => false,
+        }
+    }
 }
+
+impl Eq for BlockItem {}
+
+#[derive(Debug)]
+pub struct Decl {
+    pub kind: DeclKind,
+    pub span: Span,
+}
+
+impl PartialEq for Decl {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind
+    }
+}
+
+impl Eq for Decl {}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct DeclKind {
+    pub name: String,
+    pub initializer: Option<Expr>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Stmt {
+    pub kind: StmtKind,
+    pub span: Span,
+}
+
+impl PartialEq for Stmt {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind
+    }
+}
+
+impl Eq for Stmt {}
 
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub enum Statement {
-    Return(Expression),
-    Expression(Option<Expression>),
+pub enum StmtKind {
+    Return(Expr),
+    Expr(Option<Expr>),
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
@@ -59,11 +119,11 @@ pub enum BinaryOperator {
     Ge,
 }
 
-impl TryFrom<TokenKind> for BinaryOperator {
-    type Error = ParserError<'static>;
+impl TryFrom<&Token<'_>> for BinaryOperator {
+    type Error = ParserError;
 
-    fn try_from(kind: TokenKind) -> Result<Self, Self::Error> {
-        match kind {
+    fn try_from(tok: &Token<'_>) -> Result<Self, Self::Error> {
+        match tok.kind {
             TokenKind::Plus => Ok(BinaryOperator::Add),
             TokenKind::Minus => Ok(BinaryOperator::Sub),
             TokenKind::Mul => Ok(BinaryOperator::Mul),
@@ -82,7 +142,10 @@ impl TryFrom<TokenKind> for BinaryOperator {
             TokenKind::Gt => Ok(BinaryOperator::Gt),
             TokenKind::Le => Ok(BinaryOperator::Le),
             TokenKind::Ge => Ok(BinaryOperator::Ge),
-            _ => Err(ParserError::InvalidBinaryOperator(kind)),
+            _ => Err(ParserError::InvalidBinaryOperator {
+                op: tok.kind,
+                span: tok.span.into(),
+            }),
         }
     }
 }
@@ -112,11 +175,25 @@ impl std::fmt::Display for BinaryOperator {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct Expr {
+    pub kind: ExprKind,
+    pub span: Span,
+}
+
+impl PartialEq for Expr {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind
+    }
+}
+
+impl Eq for Expr {}
+
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub enum Expression {
+pub enum ExprKind {
     Constant(i32),
     Var(String),
-    Unary(UnaryOperator, Box<Expression>),
-    Binary(BinaryOperator, Box<Expression>, Box<Expression>),
-    Assignment(Box<Expression>, Box<Expression>),
+    Unary(UnaryOperator, Box<Expr>),
+    Binary(BinaryOperator, Box<Expr>, Box<Expr>),
+    Assignment(Box<Expr>, Box<Expr>),
 }

@@ -1,13 +1,11 @@
 use clap::Parser;
-use rcc::{
-    codegen::{X86Emitter, X86EmitterError},
-    lexer::{Lexer, LexerError},
-    parser::ParserError,
-    sema::SemaError,
-    tacky::{TackyEmitter, TackyError},
+use miette::{
+    GraphicalReportHandler, GraphicalTheme, IntoDiagnostic, NamedSource, ThemeCharacters,
+    ThemeStyles,
 };
+use rcc::{codegen::X86Emitter, lexer::Lexer, tacky::TackyEmitter};
 use std::io::Write;
-use std::{error::Error, fmt::Display, fs::File, path::PathBuf, process::Command};
+use std::{fs::File, path::PathBuf, process::Command};
 
 #[derive(clap::Parser, Debug)]
 #[command(author, version, about)]
@@ -40,7 +38,7 @@ struct Args {
     output: Option<PathBuf>,
 }
 
-fn main() {
+fn main() -> miette::Result<()> {
     let args = Args::parse();
     if !args.c_file.is_file() {
         eprintln!("error: input must be a file");
@@ -61,10 +59,9 @@ fn main() {
         .clone()
         .unwrap_or_else(|| args.c_file.with_extension(""));
 
-    if let Err(e) = run(&args, &prog, &asm_path, &out_path) {
-        eprintln!("error: {e}");
-        std::process::exit(1);
-    }
+    run(&args, &prog, &asm_path, &out_path)?;
+
+    Ok(())
 }
 
 fn run<'a>(
@@ -72,29 +69,63 @@ fn run<'a>(
     prog: &'a str,
     asm_path: &std::path::Path,
     out_path: &std::path::Path,
-) -> Result<(), CompileError<'a>> {
-    let tokens = Lexer::new(prog).lex()?;
+) -> miette::Result<()> {
+    let source = NamedSource::new(args.c_file.display().to_string(), prog.to_string());
+
+    // Set up custom miette reporter with minimal theme
+    miette::set_hook(Box::new(|_| {
+        Box::new(
+            GraphicalReportHandler::default().with_theme(GraphicalTheme {
+                characters: ThemeCharacters {
+                    hbar: ' ',
+                    vbar: ' ',
+                    xbar: ' ',
+                    vbar_break: ' ',
+                    ltop: ' ',
+                    rtop: ' ',
+                    mtop: ' ',
+                    lbot: ' ',
+                    rbot: ' ',
+                    mbot: ' ',
+                    error: "->".into(),
+                    warning: "".into(),
+                    advice: "".into(),
+                    ..ThemeCharacters::ascii()
+                },
+                styles: ThemeStyles::rgb(),
+            }),
+        )
+    }))?;
+
+    let tokens = Lexer::new(prog)
+        .lex()
+        .map_err(|e| miette::Report::new(e).with_source_code(source.clone()))?;
     if args.lex {
         tokens.iter().for_each(|tok| print!("{}", tok));
         println!();
         return Ok(());
     }
 
-    let mut ast = rcc::parser::Parser::new(prog).parse()?;
+    let mut ast = rcc::parser::Parser::new(prog)
+        .parse()
+        .map_err(|e| miette::Report::new(e).with_source_code(source.clone()))?;
     if args.parse {
         println!("{:?}", ast);
         return Ok(());
     }
 
     let mut sema = rcc::sema::VariableResolver::new();
-    sema.run(&mut ast)?;
+    sema.run(&mut ast)
+        .map_err(|e| miette::Report::new(e).with_source_code(source.clone()))?;
     if args.validate {
         println!("{:?}", ast);
         return Ok(());
     }
 
     let mut tacky_emitter = TackyEmitter::new();
-    tacky_emitter.visit_program(ast)?;
+    tacky_emitter
+        .visit_program(ast)
+        .map_err(|e| miette::Report::new(e).with_source_code(source.clone()))?;
     let prog = tacky_emitter
         .get_program()
         .expect("There should be a program");
@@ -104,90 +135,28 @@ fn run<'a>(
     }
 
     let mut emitter = X86Emitter::new();
-    emitter.visit_program(prog)?;
+    emitter.visit_program(prog).into_diagnostic()?;
     let prog = emitter.get_program().expect("There should be a program");
     if args.codegen {
         println!("{}", prog);
         return Ok(());
     }
 
-    let mut file = File::create(asm_path)?;
-    writeln!(file, "{}", prog)?;
+    let mut file = File::create(asm_path).into_diagnostic()?;
+    writeln!(file, "{}", prog).into_diagnostic()?;
 
     let status = Command::new("clang")
         .arg(asm_path)
         .arg("-o")
         .arg(out_path)
-        .status()?;
+        .status()
+        .into_diagnostic()?;
 
     if !status.success() {
-        return Err(CompileError::Linker);
+        miette::bail!("Error linking program");
     }
 
-    std::fs::remove_file(asm_path)?;
+    std::fs::remove_file(asm_path).into_diagnostic()?;
 
     Ok(())
-}
-
-#[derive(Debug)]
-enum CompileError<'a> {
-    Io(std::io::Error),
-    Lexer(LexerError<'a>),
-    Parser(ParserError<'a>),
-    Sema(SemaError),
-    Tacky(TackyError),
-    CodeGen(X86EmitterError),
-    Linker,
-}
-
-impl<'a> From<LexerError<'a>> for CompileError<'a> {
-    fn from(e: LexerError<'a>) -> Self {
-        CompileError::Lexer(e)
-    }
-}
-
-impl<'a> From<ParserError<'a>> for CompileError<'a> {
-    fn from(e: ParserError<'a>) -> Self {
-        CompileError::Parser(e)
-    }
-}
-
-impl From<std::io::Error> for CompileError<'_> {
-    fn from(e: std::io::Error) -> Self {
-        CompileError::Io(e)
-    }
-}
-
-impl From<X86EmitterError> for CompileError<'_> {
-    fn from(e: X86EmitterError) -> Self {
-        CompileError::CodeGen(e)
-    }
-}
-
-impl From<TackyError> for CompileError<'_> {
-    fn from(e: TackyError) -> Self {
-        CompileError::Tacky(e)
-    }
-}
-
-impl From<SemaError> for CompileError<'_> {
-    fn from(e: SemaError) -> Self {
-        CompileError::Sema(e)
-    }
-}
-
-impl Error for CompileError<'_> {}
-
-impl Display for CompileError<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CompileError::Io(e) => e.fmt(f),
-            CompileError::Lexer(e) => e.fmt(f),
-            CompileError::Parser(e) => e.fmt(f),
-            CompileError::Sema(e) => e.fmt(f),
-            CompileError::Tacky(e) => e.fmt(f),
-            CompileError::CodeGen(e) => e.fmt(f),
-            CompileError::Linker => write!(f, "Error linking program"),
-        }
-    }
 }

@@ -1,50 +1,55 @@
+use miette::{Diagnostic, SourceSpan};
+use thiserror::Error;
+
 use crate::lexer::{LexerError, TokenKind};
 
-use std::{error::Error, num::ParseIntError};
+use std::num::ParseIntError;
 
-#[derive(Debug)]
-pub enum ParserError<'a> {
-    NoMoreTokens,
-    Expected(TokenKind, TokenKind),
-    ExpectedAny(&'a [TokenKind], TokenKind),
-    LexerError(LexerError<'a>),
-    ParseIntError(ParseIntError),
-    InvalidUnaryOperator(TokenKind),
-    InvalidBinaryOperator(TokenKind),
-    InvalidBody(TokenKind),
-}
+#[derive(Debug, Clone, Error, Diagnostic)]
+pub enum ParserError {
+    #[error(transparent)]
+    LexerError(#[from] LexerError),
 
-impl std::fmt::Display for ParserError<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ParserError::NoMoreTokens => write!(f, "All tokens were exhausted"),
-            ParserError::Expected(expected, got) => {
-                write!(f, "Expected {:?}, got {:?}", expected, got)
-            }
-            ParserError::LexerError(e) => e.fmt(f),
-            ParserError::ParseIntError(e) => e.fmt(f),
-            ParserError::ExpectedAny(expected, got) => {
-                write!(f, "Expected any of {:?}, got {:?}", expected, got)
-            }
-            ParserError::InvalidUnaryOperator(op) => write!(f, "Invalid unary operator: {:?}", op),
-            ParserError::InvalidBinaryOperator(op) => {
-                write!(f, "Invalid binary operator: {:?}", op)
-            }
-            ParserError::InvalidBody(tok) => write!(f, "Invalid function body: found {:?}", tok),
-        }
-    }
-}
+    #[error(transparent)]
+    ParseIntError(#[from] ParseIntError),
 
-impl Error for ParserError<'_> {}
+    #[diagnostic(code(parser::no_more_tokens))]
+    #[error("Unexpected EOF")]
+    NoMoreTokens {
+        #[label]
+        span: SourceSpan,
+    },
 
-impl<'a> From<LexerError<'a>> for ParserError<'a> {
-    fn from(e: LexerError<'a>) -> Self {
-        Self::LexerError(e)
-    }
-}
+    #[diagnostic(code(parser::expected))]
+    #[error("Expected {}, got {}", expected, got)]
+    Expected {
+        expected: TokenKind,
+        got: TokenKind,
+        #[label]
+        span: SourceSpan,
+    },
 
-impl<'a> From<ParseIntError> for ParserError<'a> {
-    fn from(e: ParseIntError) -> Self {
-        Self::ParseIntError(e)
-    }
+    #[diagnostic(code(parser::expected_expression))]
+    #[error("Expected expression, got {}", got)]
+    ExpectedExpression {
+        got: TokenKind,
+        #[label]
+        span: SourceSpan,
+    },
+
+    #[diagnostic(code(parser::invalid_unary_operator))]
+    #[error("Invalid unary operator: {}", op)]
+    InvalidUnaryOperator {
+        op: TokenKind,
+        #[label]
+        span: SourceSpan,
+    },
+
+    #[diagnostic(code(parser::invalid_binary_operator))]
+    #[error("Invalid binary operator: {}", op)]
+    InvalidBinaryOperator {
+        op: TokenKind,
+        #[label]
+        span: SourceSpan,
+    },
 }

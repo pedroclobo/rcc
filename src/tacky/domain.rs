@@ -154,7 +154,7 @@ impl TryFrom<parser::BinaryOperator> for BinaryOperator {
             parser::BinaryOperator::Gt => Ok(BinaryOperator::Gt),
             parser::BinaryOperator::Le => Ok(BinaryOperator::Le),
             parser::BinaryOperator::Ge => Ok(BinaryOperator::Ge),
-            _ => Err(TackyError::UnsupportedBinaryOperator(op)),
+            _ => Err(TackyError::UnsupportedBinaryOperator { op }),
         }
     }
 }

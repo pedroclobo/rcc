@@ -1,10 +1,13 @@
 mod error;
 mod token;
 
+use miette::SourceSpan;
 use std::{iter::Peekable, str::Chars};
 pub use token::{Token, TokenKind};
 
 pub use error::LexerError;
+
+use crate::parser::Span;
 
 pub struct Lexer<'a> {
     input: &'a str,
@@ -21,8 +24,12 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub fn lex(&mut self) -> Result<Vec<Token<'a>>, LexerError<'a>> {
+    pub fn lex(&mut self) -> Result<Vec<Token<'a>>, LexerError> {
         self.by_ref().collect()
+    }
+
+    pub fn span(&self) -> SourceSpan {
+        SourceSpan::new(self.idx.into(), self.input.len() - self.idx)
     }
 
     fn next_char(&mut self) -> Option<char> {
@@ -92,15 +99,16 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn consume_constant(&mut self) -> Result<&'a str, LexerError<'a>> {
+    fn consume_constant(&mut self) -> Result<&'a str, LexerError> {
         let start = self.idx - 1;
         while let Some(&d) = self.peek_char() {
             if d.is_ascii_digit() {
                 self.next_char();
             } else if d.is_alphabetic() {
-                return Err(LexerError::InvalidConstant(
-                    &self.input[start..self.idx + 1],
-                ));
+                return Err(LexerError::InvalidIntegerLiteral {
+                    constant: self.input[start..self.idx + 1].to_string(),
+                    span: SourceSpan::new(start.into(), (self.idx + 1) - start),
+                });
             } else {
                 break;
             }
@@ -122,105 +130,182 @@ impl<'a> Lexer<'a> {
 }
 
 impl<'a> Iterator for Lexer<'a> {
-    type Item = Result<Token<'a>, LexerError<'a>>;
+    type Item = Result<Token<'a>, LexerError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.skip_whitespace();
 
+        let start = self.idx;
+
         let tok = match self.next_char()? {
-            '(' => Ok(Token::new(TokenKind::LParen, "(")),
-            ')' => Ok(Token::new(TokenKind::RParen, ")")),
-            '{' => Ok(Token::new(TokenKind::LBrace, "{")),
-            '}' => Ok(Token::new(TokenKind::RBrace, "}")),
-            ';' => Ok(Token::new(TokenKind::Semicolon, ";")),
+            '(' => Ok(Token::new(
+                TokenKind::LParen,
+                "(",
+                Span::new(start, self.idx),
+            )),
+            ')' => Ok(Token::new(
+                TokenKind::RParen,
+                ")",
+                Span::new(start, self.idx),
+            )),
+            '{' => Ok(Token::new(
+                TokenKind::LBrace,
+                "{",
+                Span::new(start, self.idx),
+            )),
+            '}' => Ok(Token::new(
+                TokenKind::RBrace,
+                "}",
+                Span::new(start, self.idx),
+            )),
+            ';' => Ok(Token::new(
+                TokenKind::Semicolon,
+                ";",
+                Span::new(start, self.idx),
+            )),
             '+' => {
                 if let Some('+') = self.peek_char() {
                     self.next_char();
-                    Ok(Token::new(TokenKind::Increment, "++"))
+                    Ok(Token::new(
+                        TokenKind::Increment,
+                        "++",
+                        Span::new(start, self.idx),
+                    ))
                 } else {
-                    Ok(Token::new(TokenKind::Plus, "+"))
+                    Ok(Token::new(TokenKind::Plus, "+", Span::new(start, self.idx)))
                 }
             }
             '-' => {
                 if let Some('-') = self.peek_char() {
                     self.next_char();
-                    Ok(Token::new(TokenKind::Decrement, "--"))
+                    Ok(Token::new(
+                        TokenKind::Decrement,
+                        "--",
+                        Span::new(start, self.idx),
+                    ))
                 } else {
-                    Ok(Token::new(TokenKind::Minus, "-"))
+                    Ok(Token::new(
+                        TokenKind::Minus,
+                        "-",
+                        Span::new(start, self.idx),
+                    ))
                 }
             }
-            '*' => Ok(Token::new(TokenKind::Mul, "*")),
-            '/' => Ok(Token::new(TokenKind::Div, "/")),
-            '%' => Ok(Token::new(TokenKind::Mod, "%")),
-            '~' => Ok(Token::new(TokenKind::Tilde, "~")),
+            '*' => Ok(Token::new(TokenKind::Mul, "*", Span::new(start, self.idx))),
+            '/' => Ok(Token::new(TokenKind::Div, "/", Span::new(start, self.idx))),
+            '%' => Ok(Token::new(TokenKind::Mod, "%", Span::new(start, self.idx))),
+            '~' => Ok(Token::new(
+                TokenKind::Tilde,
+                "~",
+                Span::new(start, self.idx),
+            )),
             '&' => {
                 if let Some('&') = self.peek_char() {
                     self.next_char();
-                    Ok(Token::new(TokenKind::And, "&&"))
+                    Ok(Token::new(TokenKind::And, "&&", Span::new(start, self.idx)))
                 } else {
-                    Ok(Token::new(TokenKind::Ampersand, "&"))
+                    Ok(Token::new(
+                        TokenKind::Ampersand,
+                        "&",
+                        Span::new(start, self.idx),
+                    ))
                 }
             }
             '|' => {
                 if let Some('|') = self.peek_char() {
                     self.next_char();
-                    Ok(Token::new(TokenKind::Or, "||"))
+                    Ok(Token::new(TokenKind::Or, "||", Span::new(start, self.idx)))
                 } else {
-                    Ok(Token::new(TokenKind::Pipe, "|"))
+                    Ok(Token::new(TokenKind::Pipe, "|", Span::new(start, self.idx)))
                 }
             }
-            '^' => Ok(Token::new(TokenKind::Caret, "^")),
+            '^' => Ok(Token::new(
+                TokenKind::Caret,
+                "^",
+                Span::new(start, self.idx),
+            )),
             '!' => {
                 if let Some('=') = self.peek_char() {
                     self.next_char();
-                    Ok(Token::new(TokenKind::Neq, "!="))
+                    Ok(Token::new(TokenKind::Neq, "!=", Span::new(start, self.idx)))
                 } else {
-                    Ok(Token::new(TokenKind::Bang, "!"))
+                    Ok(Token::new(TokenKind::Bang, "!", Span::new(start, self.idx)))
                 }
             }
             '<' => {
                 if let Some('<') = self.peek_char() {
                     self.next_char();
-                    Ok(Token::new(TokenKind::LShift, "<<"))
+                    Ok(Token::new(
+                        TokenKind::LShift,
+                        "<<",
+                        Span::new(start, self.idx),
+                    ))
                 } else if let Some('=') = self.peek_char() {
                     self.next_char();
-                    Ok(Token::new(TokenKind::Le, "<="))
+                    Ok(Token::new(TokenKind::Le, "<=", Span::new(start, self.idx)))
                 } else {
-                    Ok(Token::new(TokenKind::Lt, "<"))
+                    Ok(Token::new(TokenKind::Lt, "<", Span::new(start, self.idx)))
                 }
             }
             '>' => {
                 if let Some('>') = self.peek_char() {
                     self.next_char();
-                    Ok(Token::new(TokenKind::RShift, ">>"))
+                    Ok(Token::new(
+                        TokenKind::RShift,
+                        ">>",
+                        Span::new(start, self.idx),
+                    ))
                 } else if let Some('=') = self.peek_char() {
                     self.next_char();
-                    Ok(Token::new(TokenKind::Ge, ">="))
+                    Ok(Token::new(TokenKind::Ge, ">=", Span::new(start, self.idx)))
                 } else {
-                    Ok(Token::new(TokenKind::Gt, ">"))
+                    Ok(Token::new(TokenKind::Gt, ">", Span::new(start, self.idx)))
                 }
             }
             '=' => {
                 if let Some('=') = self.peek_char() {
                     self.next_char();
-                    Ok(Token::new(TokenKind::EqEq, "=="))
+                    Ok(Token::new(
+                        TokenKind::EqEq,
+                        "==",
+                        Span::new(start, self.idx),
+                    ))
                 } else {
-                    Ok(Token::new(TokenKind::Eq, "="))
+                    Ok(Token::new(TokenKind::Eq, "=", Span::new(start, self.idx)))
                 }
             }
 
             '0'..='9' => self
                 .consume_constant()
-                .map(|lexeme| Token::new(TokenKind::Constant, lexeme)),
+                .map(|lexeme| Token::new(TokenKind::Constant, lexeme, Span::new(start, self.idx))),
 
             c if c.is_alphanumeric() => match self.consume_identifier() {
-                "return" => Ok(Token::new(TokenKind::Return, "return")),
-                "void" => Ok(Token::new(TokenKind::Void, "void")),
-                "int" => Ok(Token::new(TokenKind::Int, "int")),
-                id => Ok(Token::new(TokenKind::Identifier, id)),
+                "return" => Ok(Token::new(
+                    TokenKind::Return,
+                    "return",
+                    Span::new(start, self.idx),
+                )),
+                "void" => Ok(Token::new(
+                    TokenKind::Void,
+                    "void",
+                    Span::new(start, self.idx),
+                )),
+                "int" => Ok(Token::new(
+                    TokenKind::Int,
+                    "int",
+                    Span::new(start, self.idx),
+                )),
+                id => Ok(Token::new(
+                    TokenKind::Identifier,
+                    id,
+                    Span::new(start, self.idx),
+                )),
             },
 
-            c => Err(LexerError::InvalidChar(c)),
+            c => Err(LexerError::InvalidChar {
+                char: c,
+                span: SourceSpan::new(start.into(), 1),
+            }),
         };
 
         Some(tok)
@@ -231,12 +316,12 @@ impl<'a> Iterator for Lexer<'a> {
 mod tests {
     use super::*;
 
-    fn lex(input: &str) -> Result<Vec<Token<'_>>, LexerError<'_>> {
+    fn lex(input: &str) -> Result<Vec<Token<'_>>, LexerError> {
         Ok(Lexer::new(input).into_iter().flatten().collect::<Vec<_>>())
     }
 
     fn tok(kind: TokenKind, lexeme: &'_ str) -> Token<'_> {
-        Token::new(kind, lexeme)
+        Token::new(kind, lexeme, Span::new(0, 0))
     }
 
     #[test]

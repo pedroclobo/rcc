@@ -60,17 +60,19 @@ impl<'a> TackyEmitter<'a> {
     ) -> Result<(), TackyError> {
         let mut has_return = false;
         for item in &function_definition.body {
-            if let parser::BlockItem::Statement(parser::Statement::Return(_)) = item {
+            if let parser::BlockItem::Stmt(parser::Stmt {
+                kind: parser::StmtKind::Return(_),
+                ..
+            }) = item
+            {
                 has_return = true;
             }
         }
 
         for item in function_definition.body {
             match item {
-                parser::BlockItem::Declaration(declaration) => {
-                    self.visit_declaration(declaration)?
-                }
-                parser::BlockItem::Statement(statement) => self.visit_statement(statement)?,
+                parser::BlockItem::Decl(decl) => self.visit_decl(decl)?,
+                parser::BlockItem::Stmt(stmt) => self.visit_stmt(stmt)?,
             }
         }
 
@@ -87,27 +89,31 @@ impl<'a> TackyEmitter<'a> {
         Ok(())
     }
 
-    fn visit_declaration(&mut self, declaration: parser::Declaration) -> Result<(), TackyError> {
-        if let Some(initializer) = declaration.initializer {
-            let expr = self.visit_expression(initializer)?;
+    fn visit_decl(&mut self, decl: parser::Decl) -> Result<(), TackyError> {
+        let parser::Decl { kind, .. } = decl;
+
+        if let Some(initializer) = kind.initializer {
+            let expr = self.visit_expr(initializer)?;
             self.instructions.push(Instruction::Copy(
                 Box::new(expr),
-                Box::new(Value::Var(declaration.name)),
+                Box::new(Value::Var(kind.name)),
             ));
         }
 
         Ok(())
     }
 
-    fn visit_statement(&mut self, statement: parser::Statement) -> Result<(), TackyError> {
-        match statement {
-            parser::Statement::Return(expression) => {
-                let expr = self.visit_expression(expression)?;
+    fn visit_stmt(&mut self, stmt: parser::Stmt) -> Result<(), TackyError> {
+        let parser::Stmt { kind, .. } = stmt;
+
+        match kind {
+            parser::StmtKind::Return(expression) => {
+                let expr = self.visit_expr(expression)?;
                 self.instructions.push(Instruction::Return(expr));
             }
-            parser::Statement::Expression(expression) => {
+            parser::StmtKind::Expr(expression) => {
                 if let Some(expression) = expression {
-                    self.visit_expression(expression)?;
+                    self.visit_expr(expression)?;
                 }
             }
         };
@@ -115,12 +121,13 @@ impl<'a> TackyEmitter<'a> {
         Ok(())
     }
 
-    fn visit_expression(&mut self, expression: parser::Expression) -> Result<Value, TackyError> {
-        match expression {
-            parser::Expression::Constant(n) => Ok(Value::Constant(n)),
-            parser::Expression::Unary(op, expr) => {
+    fn visit_expr(&mut self, expr: parser::Expr) -> Result<Value, TackyError> {
+        let parser::Expr { kind, .. } = expr;
+        match kind {
+            parser::ExprKind::Constant(n) => Ok(Value::Constant(n)),
+            parser::ExprKind::Unary(op, expr) => {
                 let dst = self.make_tmp();
-                let expr = self.visit_expression(*expr)?;
+                let expr = self.visit_expr(*expr)?;
 
                 self.instructions.push(Instruction::Unary(
                     op.into(),
@@ -130,7 +137,7 @@ impl<'a> TackyEmitter<'a> {
 
                 Ok(dst)
             }
-            parser::Expression::Binary(
+            parser::ExprKind::Binary(
                 op @ (parser::BinaryOperator::And | parser::BinaryOperator::Or),
                 lhs,
                 rhs,
@@ -138,7 +145,7 @@ impl<'a> TackyEmitter<'a> {
                 let other_label = self.make_label();
                 let end_label = self.make_label();
 
-                let lhs = self.visit_expression(*lhs)?;
+                let lhs = self.visit_expr(*lhs)?;
                 let v1 = self.make_tmp();
 
                 self.instructions.extend(vec![
@@ -150,7 +157,7 @@ impl<'a> TackyEmitter<'a> {
                     },
                 ]);
 
-                let rhs = self.visit_expression(*rhs)?;
+                let rhs = self.visit_expr(*rhs)?;
                 let v2 = self.make_tmp();
                 let dst = self.make_tmp();
 
@@ -184,9 +191,9 @@ impl<'a> TackyEmitter<'a> {
 
                 Ok(dst)
             }
-            parser::Expression::Binary(op, lhs, rhs) => {
-                let lhs = self.visit_expression(*lhs)?;
-                let rhs = self.visit_expression(*rhs)?;
+            parser::ExprKind::Binary(op, lhs, rhs) => {
+                let lhs = self.visit_expr(*lhs)?;
+                let rhs = self.visit_expr(*rhs)?;
                 let dst = self.make_tmp();
 
                 self.instructions.push(Instruction::Binary(
@@ -198,10 +205,10 @@ impl<'a> TackyEmitter<'a> {
 
                 Ok(dst)
             }
-            parser::Expression::Var(name) => Ok(Value::Var(name)),
-            parser::Expression::Assignment(lhs, rhs) => {
-                let lhs = self.visit_expression(*lhs)?;
-                let rhs = self.visit_expression(*rhs)?;
+            parser::ExprKind::Var(name) => Ok(Value::Var(name)),
+            parser::ExprKind::Assignment(lhs, rhs) => {
+                let lhs = self.visit_expr(*lhs)?;
+                let rhs = self.visit_expr(*rhs)?;
 
                 self.instructions
                     .push(Instruction::Copy(Box::new(rhs), Box::new(lhs.clone())));

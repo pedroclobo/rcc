@@ -21,13 +21,11 @@ impl VariableResolver {
         for function in &mut program.functions {
             for instruction in &mut function.body {
                 match instruction {
-                    parser::BlockItem::Declaration(declaration) => {
-                        *instruction =
-                            parser::BlockItem::Declaration(self.resolve_declaration(declaration)?);
+                    parser::BlockItem::Decl(decl) => {
+                        *instruction = parser::BlockItem::Decl(self.resolve_decl(decl)?);
                     }
-                    parser::BlockItem::Statement(statement) => {
-                        *instruction =
-                            parser::BlockItem::Statement(self.resolve_statement(statement)?);
+                    parser::BlockItem::Stmt(stmt) => {
+                        *instruction = parser::BlockItem::Stmt(self.resolve_stmt(stmt)?);
                     }
                 }
             }
@@ -35,72 +33,93 @@ impl VariableResolver {
         Ok(())
     }
 
-    fn resolve_declaration(
-        &mut self,
-        decl: &parser::Declaration,
-    ) -> Result<parser::Declaration, SemaError> {
-        let name = decl.name.clone();
+    fn resolve_decl(&mut self, decl: &parser::Decl) -> Result<parser::Decl, SemaError> {
+        let parser::Decl { kind, .. } = decl;
+
+        let name = kind.name.clone();
         if self.vars.contains_key(&name) {
-            return Err(SemaError::DuplicateDeclaration(name.to_string()));
+            return Err(SemaError::DuplicateDeclaration {
+                var: name.to_string(),
+                span: decl.span.clone().into(),
+            });
         }
         let new_name = self.make_tmp(&name);
         self.vars.insert(name, new_name.clone());
-        let new_initializer = if let Some(initializer) = &decl.initializer {
-            Some(self.resolve_expression(initializer)?)
+        let new_initializer = if let Some(initializer) = &kind.initializer {
+            Some(self.resolve_expr(initializer)?)
         } else {
             None
         };
-        Ok(parser::Declaration {
-            name: new_name,
-            initializer: new_initializer,
+        Ok(parser::Decl {
+            kind: parser::DeclKind {
+                name: new_name,
+                initializer: new_initializer,
+            },
+            span: decl.span.clone(),
         })
     }
 
-    fn resolve_statement(
-        &mut self,
-        stmt: &parser::Statement,
-    ) -> Result<parser::Statement, SemaError> {
-        match stmt {
-            parser::Statement::Return(expr) => {
-                Ok(parser::Statement::Return(self.resolve_expression(expr)?))
-            }
-            parser::Statement::Expression(Some(expr)) => Ok(parser::Statement::Expression(Some(
-                self.resolve_expression(expr)?,
-            ))),
-            parser::Statement::Expression(None) => Ok(stmt.clone()),
+    fn resolve_stmt(&mut self, stmt: &parser::Stmt) -> Result<parser::Stmt, SemaError> {
+        let parser::Stmt { kind, .. } = stmt;
+
+        match kind {
+            parser::StmtKind::Return(expr) => Ok(parser::Stmt {
+                kind: parser::StmtKind::Return(self.resolve_expr(expr)?),
+                span: stmt.span.clone(),
+            }),
+            parser::StmtKind::Expr(Some(expr)) => Ok(parser::Stmt {
+                kind: parser::StmtKind::Expr(Some(self.resolve_expr(expr)?)),
+                span: stmt.span.clone(),
+            }),
+            parser::StmtKind::Expr(None) => Ok(stmt.clone()),
         }
     }
 
-    fn resolve_expression(
-        &mut self,
-        expr: &parser::Expression,
-    ) -> Result<parser::Expression, SemaError> {
-        match expr {
-            parser::Expression::Constant(_) => Ok(expr.clone()),
-            parser::Expression::Var(name) => {
+    fn resolve_expr(&mut self, expr: &parser::Expr) -> Result<parser::Expr, SemaError> {
+        let parser::Expr { kind, .. } = expr;
+
+        match kind {
+            parser::ExprKind::Constant(_) => Ok(expr.clone()),
+            parser::ExprKind::Var(name) => {
                 if let Some(var) = self.vars.get(name) {
-                    Ok(parser::Expression::Var(var.clone()))
+                    Ok(parser::Expr {
+                        kind: parser::ExprKind::Var(var.clone()),
+                        span: expr.span.clone(),
+                    })
                 } else {
-                    panic!("Undefined variable: {}", name);
+                    Err(SemaError::UndeclaredVariable {
+                        var: name.clone(),
+                        span: expr.span.into(),
+                    })
                 }
             }
-            parser::Expression::Unary(op, operand) => Ok(parser::Expression::Unary(
-                *op,
-                Box::new(self.resolve_expression(operand)?),
-            )),
-            parser::Expression::Binary(op, lhs, rhs) => Ok(parser::Expression::Binary(
-                *op,
-                Box::new(self.resolve_expression(lhs)?),
-                Box::new(self.resolve_expression(rhs)?),
-            )),
-            parser::Expression::Assignment(lhs, rhs) => {
-                if !matches!(&**lhs, parser::Expression::Var(_)) {
-                    panic!("Invalid assignment target");
+            parser::ExprKind::Unary(op, operand) => Ok(parser::Expr {
+                kind: parser::ExprKind::Unary(*op, Box::new(self.resolve_expr(operand)?)),
+                span: expr.span.clone(),
+            }),
+            parser::ExprKind::Binary(op, lhs, rhs) => Ok(parser::Expr {
+                kind: parser::ExprKind::Binary(
+                    *op,
+                    Box::new(self.resolve_expr(lhs)?),
+                    Box::new(self.resolve_expr(rhs)?),
+                ),
+                span: expr.span.clone(),
+            }),
+            parser::ExprKind::Assignment(lhs, rhs) => {
+                if !matches!(lhs.kind, parser::ExprKind::Var(_)) {
+                    Err(SemaError::InvalidAssignmentTarget {
+                        expr: *lhs.clone(),
+                        span: lhs.span.clone().into(),
+                    })
+                } else {
+                    Ok(parser::Expr {
+                        kind: parser::ExprKind::Assignment(
+                            Box::new(self.resolve_expr(lhs)?),
+                            Box::new(self.resolve_expr(rhs)?),
+                        ),
+                        span: expr.span.clone(),
+                    })
                 }
-                Ok(parser::Expression::Assignment(
-                    Box::new(self.resolve_expression(lhs)?),
-                    Box::new(self.resolve_expression(rhs)?),
-                ))
             }
         }
     }

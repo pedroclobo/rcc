@@ -1,16 +1,10 @@
+use miette::Diagnostic;
+use thiserror::Error;
+
 use crate::parser;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Error, Diagnostic)]
 pub enum TackyError {
-    UnsupportedBinaryOperator(parser::BinaryOperator),
-}
-
-impl std::fmt::Display for TackyError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TackyError::UnsupportedBinaryOperator(op) => {
-                write!(f, "No matching binary operator for {}", op)
-            }
-        }
-    }
+    #[error("No matching binary operator for '{op}'")]
+    UnsupportedBinaryOperator { op: parser::BinaryOperator },
 }

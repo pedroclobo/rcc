@@ -1,20 +1,21 @@
-use std::error::Error;
+use miette::{Diagnostic, SourceSpan};
+use thiserror::Error;
 
-#[derive(Debug, Clone, Copy)]
-pub enum LexerError<'a> {
-    InvalidChar(char),
-    InvalidConstant(&'a str),
-    InvalidSequence(&'a str),
+#[derive(Debug, Clone, Error, Diagnostic)]
+pub enum LexerError {
+    #[diagnostic(code(lexer::invalid_char))]
+    #[error("Invalid char '{char}'")]
+    InvalidChar {
+        char: char,
+        #[label]
+        span: SourceSpan,
+    },
+
+    #[diagnostic(code(lexer::invalid_integer_literal))]
+    #[error("Invalid integer literal '{constant}'")]
+    InvalidIntegerLiteral {
+        constant: String,
+        #[label]
+        span: SourceSpan,
+    },
 }
-
-impl std::fmt::Display for LexerError<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            LexerError::InvalidChar(c) => write!(f, "Invalid char: {}", c),
-            LexerError::InvalidConstant(c) => write!(f, "Invalid constant literal: {}", c),
-            LexerError::InvalidSequence(s) => write!(f, "Invalid character sequence: {}", s),
-        }
-    }
-}
-
-impl Error for LexerError<'_> {}

@@ -1,9 +1,8 @@
 use super::{
     BinaryOperator, ConditionCode, FunctionDefinition, Instruction, InstructionFixer, Operand,
-    Program, Register,
+    Program, Register, X86EmitterError,
 };
 use crate::tacky;
-use std::{error::Error, fmt::Display};
 
 pub struct X86Emitter<'a> {
     program: Option<Program<'a>>,
@@ -170,26 +169,3 @@ impl<'a> X86Emitter<'a> {
         Ok(())
     }
 }
-
-#[derive(Debug)]
-pub enum X86EmitterError {
-    NoProgram,
-    UnsupportedBinaryOperator(tacky::BinaryOperator),
-    NoMatchingConditionCode(tacky::BinaryOperator),
-}
-
-impl Display for X86EmitterError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            X86EmitterError::NoProgram => write!(f, "No program provided"),
-            X86EmitterError::UnsupportedBinaryOperator(op) => {
-                write!(f, "No matching binary operator for {}", op)
-            }
-            X86EmitterError::NoMatchingConditionCode(op) => {
-                write!(f, "No matching condition code for {}", op)
-            }
-        }
-    }
-}
-
-impl Error for X86EmitterError {}

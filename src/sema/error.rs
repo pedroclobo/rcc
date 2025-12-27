@@ -1,18 +1,31 @@
-#[derive(Debug)]
+use miette::{Diagnostic, SourceSpan};
+use thiserror::Error;
+
+use crate::parser;
+
+#[derive(Debug, Clone, Error, Diagnostic)]
 pub enum SemaError {
-    UndeclaredVariable(String),
-    DuplicateDeclaration(String),
-}
+    #[diagnostic(code(sema::undeclared_variable))]
+    #[error("Variable '{var}' not declared")]
+    UndeclaredVariable {
+        var: String,
+        #[label]
+        span: SourceSpan,
+    },
 
-impl std::fmt::Display for SemaError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            SemaError::UndeclaredVariable(name) => write!(f, "Variable '{}' not declared", name),
-            SemaError::DuplicateDeclaration(name) => {
-                write!(f, "Duplicate declaration of variable '{}'", name)
-            }
-        }
-    }
-}
+    #[diagnostic(code(sema::invalid_assignment_target))]
+    #[error("Invalid assignment target")]
+    InvalidAssignmentTarget {
+        expr: parser::Expr,
+        #[label]
+        span: SourceSpan,
+    },
 
-impl std::error::Error for SemaError {}
+    #[diagnostic(code(sema::duplicate_declaration))]
+    #[error("Duplicate declaration of variable '{var}'")]
+    DuplicateDeclaration {
+        var: String,
+        #[label]
+        span: SourceSpan,
+    },
+}
