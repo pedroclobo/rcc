@@ -72,6 +72,18 @@ impl VariableResolver {
                 span: stmt.span.clone(),
             }),
             parser::StmtKind::Expr(None) => Ok(stmt.clone()),
+            parser::StmtKind::If { cond, then, r#else } => Ok(parser::Stmt {
+                kind: parser::StmtKind::If {
+                    cond: self.resolve_expr(cond)?,
+                    then: Box::new(self.resolve_stmt(then)?),
+                    r#else: if let Some(r#else) = r#else {
+                        Some(Box::new(self.resolve_stmt(r#else)?))
+                    } else {
+                        None
+                    },
+                },
+                span: stmt.span.clone(),
+            }),
         }
     }
 
@@ -137,6 +149,14 @@ impl VariableResolver {
                     })
                 }
             }
+            parser::ExprKind::Conditional { cond, then, r#else } => Ok(parser::Expr {
+                kind: parser::ExprKind::Conditional {
+                    cond: Box::new(self.resolve_expr(cond)?),
+                    then: Box::new(self.resolve_expr(then)?),
+                    r#else: Box::new(self.resolve_expr(r#else)?),
+                },
+                span: expr.span.clone(),
+            }),
         }
     }
 

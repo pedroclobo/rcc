@@ -364,6 +364,16 @@ impl<'a> Iterator for Lexer<'a> {
                     Ok(Token::new(TokenKind::Eq, "=", Span::new(start, self.idx)))
                 }
             }
+            '?' => Ok(Token::new(
+                TokenKind::QMark,
+                "?",
+                Span::new(start, self.idx),
+            )),
+            ':' => Ok(Token::new(
+                TokenKind::Colon,
+                ":",
+                Span::new(start, self.idx),
+            )),
 
             '0'..='9' => self
                 .consume_constant()
@@ -383,6 +393,12 @@ impl<'a> Iterator for Lexer<'a> {
                 "int" => Ok(Token::new(
                     TokenKind::Int,
                     "int",
+                    Span::new(start, self.idx),
+                )),
+                "if" => Ok(Token::new(TokenKind::If, "if", Span::new(start, self.idx))),
+                "else" => Ok(Token::new(
+                    TokenKind::Else,
+                    "else",
                     Span::new(start, self.idx),
                 )),
                 id => Ok(Token::new(
@@ -539,6 +555,19 @@ mod tests {
                 tok(TokenKind::CaretEq, "^="),
                 tok(TokenKind::LShiftEq, "<<="),
                 tok(TokenKind::RShiftEq, ">>="),
+            ]
+        );
+    }
+
+    #[test]
+    fn conditionals() {
+        assert_eq!(
+            lex("if else ? :").unwrap(),
+            vec![
+                tok(TokenKind::If, "if"),
+                tok(TokenKind::Else, "else"),
+                tok(TokenKind::QMark, "?"),
+                tok(TokenKind::Colon, ":"),
             ]
         );
     }

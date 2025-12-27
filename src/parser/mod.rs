@@ -15,6 +15,7 @@ use std::iter::Peekable;
 enum Precedence {
     None,
     Assignment,     // =, +=, -=, *=, /=, %=, &=, |=, ^=, <<=, >>=
+    Conditional,    // ? :
     LogicalOr,      // ||
     LogicalAnd,     // &&
     BitwiseOr,      // |
@@ -32,7 +33,8 @@ impl Precedence {
     fn increment(self) -> Self {
         match self {
             Precedence::None => Precedence::Assignment,
-            Precedence::Assignment => Precedence::LogicalOr,
+            Precedence::Assignment => Precedence::Conditional,
+            Precedence::Conditional => Precedence::LogicalOr,
             Precedence::LogicalOr => Precedence::LogicalAnd,
             Precedence::LogicalAnd => Precedence::BitwiseOr,
             Precedence::BitwiseOr => Precedence::BitwiseXor,
@@ -99,6 +101,10 @@ fn is_assignment(token: &Token) -> bool {
             | TokenKind::LShiftEq
             | TokenKind::RShiftEq
     )
+}
+
+fn is_conditional(token: &Token) -> bool {
+    matches!(token.kind, TokenKind::QMark)
 }
 
 pub struct Parser<'a> {
@@ -237,7 +243,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // <stmt> ::= "return" <exp> ";" | <exp> ";" |  ";"
+    // <stmt> ::= "return" <exp> ";" | <exp> ";" | "if" "(" <exp> ")" <stmt> [ "else" <stmt> ] ";" | ";"
     fn parse_stmt(&mut self) -> Result<Stmt, ParserError> {
         match self.peek()?.kind {
             TokenKind::Return => {
@@ -256,6 +262,39 @@ impl<'a> Parser<'a> {
                     kind: StmtKind::Expr(None),
                     span: span.clone(),
                 })
+            }
+            TokenKind::If => {
+                let start = self.next()?.span.start;
+
+                self.expect(TokenKind::LParen)?;
+                let cond = self.parse_expr()?;
+                self.expect(TokenKind::RParen)?;
+
+                let then = self.parse_stmt()?;
+                let then_end = then.span.end;
+
+                if matches!(self.peek()?.kind, TokenKind::Else) {
+                    self.next()?;
+                    let r#else = self.parse_stmt()?;
+                    let else_end = r#else.span.end;
+                    Ok(Stmt {
+                        kind: StmtKind::If {
+                            cond,
+                            then: Box::new(then),
+                            r#else: Some(Box::new(r#else)),
+                        },
+                        span: Span::new(start, else_end),
+                    })
+                } else {
+                    Ok(Stmt {
+                        kind: StmtKind::If {
+                            cond,
+                            then: Box::new(then),
+                            r#else: None,
+                        },
+                        span: Span::new(start, then_end),
+                    })
+                }
             }
             _ => {
                 let expr = self.parse_expr()?;
@@ -283,13 +322,14 @@ impl<'a> Parser<'a> {
             Pipe => Precedence::BitwiseOr,
             And => Precedence::LogicalAnd,
             Or => Precedence::LogicalOr,
+            QMark | Colon => Precedence::Conditional,
             Eq | PlusEq | MinusEq | MulEq | DivEq | ModEq | AmpersandEq | CaretEq | PipeEq
             | LShiftEq | RShiftEq => Precedence::Assignment,
             _ => Precedence::None,
         }
     }
 
-    // <exp> ::= <factor> | <binexp>
+    // <exp> ::= <factor> | <binexp> | <exp> "?" <exp> ":" <exp>
     // <binexp> ::= <factor> <binop> <factor>
     fn parse_expr(&mut self) -> Result<Expr, ParserError> {
         self._parse_expr(Precedence::None)
@@ -301,7 +341,7 @@ impl<'a> Parser<'a> {
 
         while let Ok(token) = self.peek()
             && Self::precedence(token) >= precedence
-            && (is_binop(token) || is_assignment(token))
+            && (is_binop(token) || is_assignment(token) || is_conditional(token))
         {
             match token.kind {
                 TokenKind::Eq => {
@@ -329,6 +369,26 @@ impl<'a> Parser<'a> {
                     lhs = Expr {
                         kind: ExprKind::Assignment(Box::new(lhs), Box::new(rhs)),
                         span: lhs_span.clone().merge(&rhs_span),
+                    }
+                }
+                _ if is_conditional(token) => {
+                    let start = token.span.start;
+                    let precedence = Self::precedence(token);
+
+                    self.expect(TokenKind::QMark)?;
+                    let then = self.parse_expr()?;
+                    self.expect(TokenKind::Colon)?;
+
+                    let r#else = self._parse_expr(precedence)?;
+                    let end = r#else.span.end;
+
+                    lhs = Expr {
+                        kind: ExprKind::Conditional {
+                            cond: Box::new(lhs),
+                            then: Box::new(then),
+                            r#else: Box::new(r#else),
+                        },
+                        span: Span::new(start, end),
                     }
                 }
                 _ => {
@@ -452,6 +512,16 @@ mod tests {
         };
     }
 
+    macro_rules! if_expr {
+        ($cond:expr, $then:expr, $else:expr) => {
+            expr!(ExprKind::Conditional {
+                cond: Box::new($cond),
+                then: Box::new($then),
+                r#else: Box::new($else)
+            })
+        };
+    }
+
     macro_rules! stmt {
         ($kind:expr) => {
             Stmt {
@@ -494,6 +564,23 @@ mod tests {
     macro_rules! return_stmt {
         ($expr:expr) => {
             stmt!(StmtKind::Return($expr))
+        };
+    }
+
+    macro_rules! if_stmt {
+        ($cond:expr, $then:expr) => {
+            stmt!(StmtKind::If {
+                cond: $cond,
+                then: Box::new($then),
+                r#else: None
+            })
+        };
+        ($cond:expr, $then:expr, $else:expr) => {
+            stmt!(StmtKind::If {
+                cond: $cond,
+                then: Box::new($then),
+                r#else: Some(Box::new($else))
+            })
         };
     }
 
@@ -829,5 +916,41 @@ mod tests {
                 unary!(UnaryOperator::PostInc, var!("a"))
             ),
         );
+    }
+
+    #[test]
+    fn conditional_stmt() {
+        let mut parser = Parser::new(
+            "if (a)
+        if (a > 10)
+            return a;
+        else
+            return 10 - a;;",
+        );
+        let stmt = parser.parse_stmt().unwrap();
+
+        assert_eq!(
+            stmt,
+            if_stmt!(
+                var!("a"),
+                if_stmt!(
+                    binary!(BinaryOperator::Gt, var!("a"), constant!(10)),
+                    stmt!(StmtKind::Return(var!("a"))),
+                    stmt!(StmtKind::Return(binary!(
+                        BinaryOperator::Sub,
+                        constant!(10),
+                        var!("a")
+                    )))
+                )
+            )
+        )
+    }
+
+    #[test]
+    fn conditional_expr() {
+        let mut parser = Parser::new("a ? 1 : 0");
+        let expr = parser.parse_expr().unwrap();
+
+        assert_eq!(expr, if_expr!(var!("a"), constant!(1), constant!(0)))
     }
 }

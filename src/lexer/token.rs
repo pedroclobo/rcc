@@ -72,6 +72,10 @@ pub enum TokenKind {
     RShiftEq,
     PlusPlus,
     MinusMinus,
+    If,
+    Else,
+    QMark,
+    Colon,
 }
 
 impl std::fmt::Display for TokenKind {
@@ -123,6 +127,10 @@ impl std::fmt::Display for TokenKind {
                 TokenKind::RShiftEq => "'>>='",
                 TokenKind::PlusPlus => "'++'",
                 TokenKind::MinusMinus => "'--'",
+                TokenKind::If => "'if'",
+                TokenKind::Else => "'else'",
+                TokenKind::QMark => "'?'",
+                TokenKind::Colon => "':'",
             }
         )
     }

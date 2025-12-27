@@ -116,6 +116,53 @@ impl<'a> TackyEmitter<'a> {
                     self.visit_expr(expression)?;
                 }
             }
+            parser::StmtKind::If {
+                cond,
+                then,
+                r#else: None,
+            } => {
+                let end_label = self.make_label();
+
+                let cond = self.visit_expr(cond)?;
+                let v1 = self.make_tmp();
+
+                self.instructions.extend(vec![
+                    Instruction::Copy(Box::new(cond), Box::new(v1.clone())),
+                    Instruction::JumpIfZero(Box::new(v1), end_label.clone()),
+                ]);
+
+                self.visit_stmt(*then)?;
+
+                self.instructions.push(Instruction::Label(end_label));
+            }
+            parser::StmtKind::If {
+                cond,
+                then,
+                r#else: Some(r#else),
+            } => {
+                let else_label = self.make_label();
+                let end_label = self.make_label();
+
+                let cond = self.visit_expr(cond)?;
+                let v1 = self.make_tmp();
+
+                self.instructions.extend(vec![
+                    Instruction::Copy(Box::new(cond), Box::new(v1.clone())),
+                    Instruction::JumpIfZero(Box::new(v1), else_label.clone()),
+                ]);
+
+                self.visit_stmt(*then)?;
+
+                self.instructions.extend(vec![
+                    Instruction::Jump(end_label.clone()),
+                    Instruction::Label(else_label),
+                ]);
+
+                self.visit_stmt(*r#else)?;
+
+                self.instructions
+                    .extend(vec![Instruction::Label(end_label)]);
+            }
         };
 
         Ok(())
@@ -268,6 +315,38 @@ impl<'a> TackyEmitter<'a> {
                     .push(Instruction::Copy(Box::new(rhs), Box::new(lhs.clone())));
 
                 Ok(lhs)
+            }
+            parser::ExprKind::Conditional { cond, then, r#else } => {
+                let result = self.make_tmp();
+                let else_label = self.make_label();
+                let end_label = self.make_label();
+
+                let cond = self.visit_expr(*cond)?;
+                let c = self.make_tmp();
+                self.instructions.extend(vec![
+                    Instruction::Copy(Box::new(cond), Box::new(c.clone())),
+                    Instruction::JumpIfZero(Box::new(c), else_label.clone()),
+                ]);
+
+                let then = self.visit_expr(*then)?;
+                let v1 = self.make_tmp();
+                self.instructions.extend(vec![
+                    Instruction::Copy(Box::new(then), Box::new(v1.clone())),
+                    Instruction::Copy(Box::new(v1), Box::new(result.clone())),
+                    Instruction::Jump(end_label.clone()),
+                ]);
+
+                self.instructions.push(Instruction::Label(else_label));
+                let r#else = self.visit_expr(*r#else)?;
+                let v2 = self.make_tmp();
+                self.instructions.extend(vec![
+                    Instruction::Copy(Box::new(r#else), Box::new(v2.clone())),
+                    Instruction::Copy(Box::new(v2), Box::new(result.clone())),
+                ]);
+
+                self.instructions.push(Instruction::Label(end_label));
+
+                Ok(result)
             }
         }
     }

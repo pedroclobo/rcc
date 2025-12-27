@@ -95,6 +95,11 @@ impl Eq for Stmt {}
 pub enum StmtKind {
     Return(Expr),
     Expr(Option<Expr>),
+    If {
+        cond: Expr,
+        then: Box<Stmt>,
+        r#else: Option<Box<Stmt>>,
+    },
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
@@ -243,4 +248,9 @@ pub enum ExprKind {
     Unary(UnaryOperator, Box<Expr>),
     Binary(BinaryOperator, Box<Expr>, Box<Expr>),
     Assignment(Box<Expr>, Box<Expr>),
+    Conditional {
+        cond: Box<Expr>,
+        then: Box<Expr>,
+        r#else: Box<Expr>,
+    },
 }

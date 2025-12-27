@@ -102,9 +102,15 @@ impl InstructionFixer {
                             ),
                         ]
                     }
-                    // Handled by postamble.
                     Instruction::Ret => {
-                        vec![]
+                        vec![
+                            Instruction::Mov(
+                                Operand::Reg(Register::Rbp),
+                                Operand::Reg(Register::Rsp),
+                            ),
+                            Instruction::Pop(Operand::Reg(Register::Rbp)),
+                            Instruction::Ret,
+                        ]
                     }
                     Instruction::Binary(
                         op @ (BinaryOperator::Add
@@ -207,13 +213,6 @@ impl InstructionFixer {
                     }
                 })
             }
-
-            // Postamble
-            instructions.extend(vec![
-                Instruction::Mov(Operand::Reg(Register::Rbp), Operand::Reg(Register::Rsp)),
-                Instruction::Pop(Operand::Reg(Register::Rbp)),
-                Instruction::Ret,
-            ])
         }
     }
 
