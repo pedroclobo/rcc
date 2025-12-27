@@ -48,6 +48,18 @@ impl Precedence {
     }
 }
 
+fn is_prefix_op(token: &Token) -> bool {
+    matches!(
+        token.kind,
+        TokenKind::Minus
+            | TokenKind::Tilde
+            | TokenKind::Bang
+            | TokenKind::PlusPlus
+            | TokenKind::MinusMinus
+            | TokenKind::Ge,
+    )
+}
+
 fn is_binop(token: &Token) -> bool {
     matches!(
         token.kind,
@@ -285,7 +297,7 @@ impl<'a> Parser<'a> {
 
     fn _parse_expr(&mut self, precedence: Precedence) -> Result<Expr, ParserError> {
         let mut lhs = self.parse_factor()?;
-        let span = lhs.span;
+        let lhs_span = lhs.span;
 
         while let Ok(token) = self.peek()
             && Self::precedence(token) >= precedence
@@ -297,10 +309,10 @@ impl<'a> Parser<'a> {
                     self.next()?;
 
                     let rhs = self._parse_expr(precedence)?;
+                    let rhs_span = rhs.span;
                     lhs = Expr {
                         kind: ExprKind::Assignment(Box::new(lhs), Box::new(rhs)),
-                        // TODO: should probably merge here
-                        span: span.clone(),
+                        span: lhs_span.clone().merge(&rhs_span),
                     }
                 }
                 _ if is_assignment(token) => {
@@ -309,15 +321,14 @@ impl<'a> Parser<'a> {
                     self.next()?;
 
                     let mut rhs = self._parse_expr(precedence)?;
-                    let span = rhs.span;
+                    let rhs_span = rhs.span;
                     rhs = Expr {
                         kind: ExprKind::Binary(op, Box::new(lhs.clone()), Box::new(rhs)),
-                        span: span,
+                        span: rhs_span.clone(),
                     };
                     lhs = Expr {
                         kind: ExprKind::Assignment(Box::new(lhs), Box::new(rhs)),
-                        // TODO: should probably merge here
-                        span: span.clone(),
+                        span: lhs_span.clone().merge(&rhs_span),
                     }
                 }
                 _ => {
@@ -326,10 +337,10 @@ impl<'a> Parser<'a> {
                     self.next()?;
 
                     let rhs = self._parse_expr(precedence.increment())?;
+                    let rhs_span = rhs.span;
                     lhs = Expr {
                         kind: ExprKind::Binary(op, Box::new(lhs), Box::new(rhs)),
-                        // TODO: should probably merge here
-                        span: span.clone(),
+                        span: lhs_span.clone().merge(&rhs_span),
                     }
                 }
             }
@@ -337,7 +348,7 @@ impl<'a> Parser<'a> {
         Ok(lhs)
     }
 
-    // <factor> ::= constant | <identifier> | "(" <exp> ")" | <unexp>
+    // <factor> ::= constant | <identifier> | "(" <exp> ")" | <prefix_expr>
     fn parse_factor(&mut self) -> Result<Expr, ParserError> {
         let tok = self.peek()?;
         match tok.kind {
@@ -350,19 +361,28 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Identifier => {
                 let tok = self.expect(TokenKind::Identifier)?;
-                let identifier = tok.lexeme.to_string();
-                Ok(Expr {
-                    kind: ExprKind::Var(identifier),
+                let expr = Expr {
+                    kind: ExprKind::Var(tok.lexeme.to_string()),
                     span: tok.span.clone(),
-                })
+                };
+
+                let tok = self.peek()?;
+                match tok.kind {
+                    TokenKind::PlusPlus | TokenKind::MinusMinus => self.parse_postfix_expr(expr),
+                    _ => Ok(expr),
+                }
             }
             TokenKind::LParen => {
                 self.expect(TokenKind::LParen)?;
                 let expr = self.parse_expr()?;
                 self.expect(TokenKind::RParen)?;
-                Ok(expr)
+                let tok = self.peek()?;
+                match tok.kind {
+                    TokenKind::PlusPlus | TokenKind::MinusMinus => self.parse_postfix_expr(expr),
+                    _ => Ok(expr),
+                }
             }
-            TokenKind::Minus | TokenKind::Tilde | TokenKind::Bang => self.parse_unary_expr(),
+            _ if is_prefix_op(&tok) => self.parse_prefix_expr(),
             _ => Err(ParserError::ExpectedExpression {
                 got: tok.kind,
                 span: tok.span.into(),
@@ -370,24 +390,12 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // <unexp> ::= <unop> <factor>
-    // <unop>  ::= "-" | "~" | "!"
-    fn parse_unary_expr(&mut self) -> Result<Expr, ParserError> {
+    // <preexp> ::= <preop> <factor>
+    // <preop>  ::= "-" | "~" | "!" | "++" | "--"
+    fn parse_prefix_expr(&mut self) -> Result<Expr, ParserError> {
         let tok = self.next()?;
         let start = tok.span.start;
-
-        let op = match tok.kind {
-            TokenKind::Minus => UnaryOperator::Neg,
-            TokenKind::Tilde => UnaryOperator::BNot,
-            TokenKind::Bang => UnaryOperator::Not,
-            _ => {
-                return Err(ParserError::InvalidUnaryOperator {
-                    op: tok.kind,
-                    span: tok.span.into(),
-                });
-            }
-        };
-
+        let op = UnaryOperator::try_from(&tok)?;
         let factor = self.parse_factor()?;
         let end = factor.span.end;
 
@@ -395,6 +403,32 @@ impl<'a> Parser<'a> {
             kind: ExprKind::Unary(op, Box::new(factor)),
             span: Span::new(start, end),
         })
+    }
+
+    // <postexp> ::= <factor> <postop>
+    // <postop>  ::= "++" | "--"
+    fn parse_postfix_expr(&mut self, expr: Expr) -> Result<Expr, ParserError> {
+        let tok = self.next()?;
+        let inner_span = expr.span;
+
+        match tok.kind {
+            TokenKind::PlusPlus | TokenKind::MinusMinus => {
+                let op = if matches!(tok.kind, TokenKind::PlusPlus) {
+                    UnaryOperator::PostInc
+                } else {
+                    UnaryOperator::PostDec
+                };
+
+                Ok(Expr {
+                    kind: ExprKind::Unary(op, Box::new(expr)),
+                    span: inner_span.merge(&tok.span),
+                })
+            }
+            _ => Err(ParserError::InvalidUnaryOperator {
+                op: tok.kind,
+                span: tok.span.into(),
+            }),
+        }
     }
 }
 
@@ -670,7 +704,7 @@ mod tests {
 
     #[test]
     fn compound_assignment() {
-        let mut parser = Parser::new("a += b -= c *= d /= e %= f &= g ^= h |= i <<= j >>= k");
+        let mut parser = Parser::new("a += b -= c *= d /= e %= f &= g ^= h |= i <<= j >>= k;");
         let expr = parser.parse_expr().unwrap();
 
         assert_eq!(
@@ -746,6 +780,54 @@ mod tests {
                     )
                 )
             )
+        );
+    }
+
+    #[test]
+    fn pre_incr_decr() {
+        let mut parser = Parser::new("--a + ++b - 1");
+        let expr = parser.parse_expr().unwrap();
+
+        assert_eq!(
+            expr,
+            binary!(
+                BinaryOperator::Sub,
+                binary!(
+                    BinaryOperator::Add,
+                    unary!(UnaryOperator::PreDec, var!("a")),
+                    unary!(UnaryOperator::PreInc, var!("b"))
+                ),
+                constant!(1)
+            )
+        );
+    }
+
+    #[test]
+    fn post_incr_decr() {
+        let mut parser = Parser::new("a-- + b++");
+        let expr = parser.parse_expr().unwrap();
+
+        assert_eq!(
+            expr,
+            binary!(
+                BinaryOperator::Add,
+                unary!(UnaryOperator::PostDec, var!("a")),
+                unary!(UnaryOperator::PostInc, var!("b"))
+            )
+        );
+    }
+
+    #[test]
+    fn post_incr_paren() {
+        let mut parser = Parser::new("!(a)++");
+        let expr = parser.parse_expr().unwrap();
+
+        assert_eq!(
+            expr,
+            unary!(
+                UnaryOperator::Not,
+                unary!(UnaryOperator::PostInc, var!("a"))
+            ),
         );
     }
 }

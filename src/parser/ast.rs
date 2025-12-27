@@ -13,6 +13,13 @@ impl Span {
     pub fn new(start: usize, end: usize) -> Self {
         Self { start, end }
     }
+
+    pub fn merge(&self, other: &Self) -> Self {
+        Self {
+            start: self.start.min(other.start),
+            end: self.end.max(other.end),
+        }
+    }
 }
 
 impl Into<SourceSpan> for Span {
@@ -95,6 +102,44 @@ pub enum UnaryOperator {
     BNot,
     Neg,
     Not,
+    PreInc,
+    PreDec,
+    PostInc,
+    PostDec,
+}
+
+impl TryFrom<&Token<'_>> for UnaryOperator {
+    type Error = ParserError;
+
+    fn try_from(tok: &Token<'_>) -> Result<Self, Self::Error> {
+        use TokenKind::*;
+
+        match tok.kind {
+            Minus => Ok(UnaryOperator::Neg),
+            Tilde => Ok(UnaryOperator::BNot),
+            Bang => Ok(UnaryOperator::Not),
+            MinusMinus => Ok(UnaryOperator::PreDec),
+            PlusPlus => Ok(UnaryOperator::PreInc),
+            _ => Err(ParserError::InvalidUnaryOperator {
+                op: tok.kind,
+                span: tok.span.into(),
+            }),
+        }
+    }
+}
+
+impl std::fmt::Display for UnaryOperator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UnaryOperator::BNot => write!(f, "~"),
+            UnaryOperator::Neg => write!(f, "-"),
+            UnaryOperator::Not => write!(f, "!"),
+            UnaryOperator::PreInc => write!(f, "++"),
+            UnaryOperator::PreDec => write!(f, "--"),
+            UnaryOperator::PostInc => write!(f, "++"),
+            UnaryOperator::PostDec => write!(f, "--"),
+        }
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]

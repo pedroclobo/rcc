@@ -1,5 +1,5 @@
 use super::{FunctionDefinition, Instruction, Program, TackyError, Value};
-use crate::parser;
+use crate::{parser, tacky::BinaryOperator};
 
 pub struct TackyEmitter<'a> {
     program: Option<Program<'a>>,
@@ -125,17 +125,71 @@ impl<'a> TackyEmitter<'a> {
         let parser::Expr { kind, .. } = expr;
         match kind {
             parser::ExprKind::Constant(n) => Ok(Value::Constant(n)),
-            parser::ExprKind::Unary(op, expr) => {
+            parser::ExprKind::Unary(
+                op @ (parser::UnaryOperator::Neg
+                | parser::UnaryOperator::Not
+                | parser::UnaryOperator::BNot),
+                expr,
+            ) => {
                 let dst = self.make_tmp();
                 let expr = self.visit_expr(*expr)?;
 
                 self.instructions.push(Instruction::Unary(
-                    op.into(),
+                    op.try_into()?,
                     Box::new(expr),
                     Box::new(dst.clone()),
                 ));
 
                 Ok(dst)
+            }
+            parser::ExprKind::Unary(
+                op @ (parser::UnaryOperator::PreInc | parser::UnaryOperator::PreDec),
+                expr,
+            ) => {
+                let dst = self.make_tmp();
+                let expr = self.visit_expr(*expr)?;
+
+                self.instructions.push(Instruction::Binary(
+                    match op {
+                        parser::UnaryOperator::PreInc => BinaryOperator::Add,
+                        parser::UnaryOperator::PreDec => BinaryOperator::Sub,
+                        _ => panic!("invalid unary operator"),
+                    },
+                    Box::new(expr.clone()),
+                    Box::new(Value::Constant(1)),
+                    Box::new(dst.clone()),
+                ));
+                self.instructions
+                    .push(Instruction::Copy(Box::new(dst.clone()), Box::new(expr)));
+
+                Ok(dst)
+            }
+            parser::ExprKind::Unary(
+                op @ (parser::UnaryOperator::PostInc | parser::UnaryOperator::PostDec),
+                expr,
+            ) => {
+                let dst_1 = self.make_tmp();
+                let dst_2 = self.make_tmp();
+                let expr = self.visit_expr(*expr)?;
+
+                self.instructions.push(Instruction::Copy(
+                    Box::new(expr.clone()),
+                    Box::new(dst_1.clone()),
+                ));
+                self.instructions.push(Instruction::Binary(
+                    match op {
+                        parser::UnaryOperator::PostInc => BinaryOperator::Add,
+                        parser::UnaryOperator::PostDec => BinaryOperator::Sub,
+                        _ => panic!("invalid unary operator"),
+                    },
+                    Box::new(dst_1.clone()),
+                    Box::new(Value::Constant(1)),
+                    Box::new(dst_2.clone()),
+                ));
+                self.instructions
+                    .push(Instruction::Copy(Box::new(dst_2), Box::new(expr)));
+
+                Ok(dst_1)
             }
             parser::ExprKind::Binary(
                 op @ (parser::BinaryOperator::And | parser::BinaryOperator::Or),

@@ -93,10 +93,26 @@ impl VariableResolver {
                     })
                 }
             }
-            parser::ExprKind::Unary(op, operand) => Ok(parser::Expr {
-                kind: parser::ExprKind::Unary(*op, Box::new(self.resolve_expr(operand)?)),
-                span: expr.span.clone(),
-            }),
+            parser::ExprKind::Unary(op, operand) => {
+                if matches!(
+                    op,
+                    parser::UnaryOperator::PreDec
+                        | parser::UnaryOperator::PreInc
+                        | parser::UnaryOperator::PostDec
+                        | parser::UnaryOperator::PostInc
+                ) && !matches!(operand.kind, parser::ExprKind::Var(_))
+                {
+                    Err(SemaError::InvalidAssignmentTarget {
+                        expr: *operand.clone(),
+                        span: operand.span.into(),
+                    })
+                } else {
+                    Ok(parser::Expr {
+                        kind: parser::ExprKind::Unary(*op, Box::new(self.resolve_expr(operand)?)),
+                        span: expr.span.clone(),
+                    })
+                }
+            }
             parser::ExprKind::Binary(op, lhs, rhs) => Ok(parser::Expr {
                 kind: parser::ExprKind::Binary(
                     *op,

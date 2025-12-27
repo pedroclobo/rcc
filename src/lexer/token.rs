@@ -44,8 +44,6 @@ pub enum TokenKind {
     Mul,
     Div,
     Mod,
-    Increment,
-    Decrement,
     Tilde,
     Ampersand,
     Pipe,
@@ -72,6 +70,8 @@ pub enum TokenKind {
     CaretEq,
     LShiftEq,
     RShiftEq,
+    PlusPlus,
+    MinusMinus,
 }
 
 impl std::fmt::Display for TokenKind {
@@ -95,8 +95,6 @@ impl std::fmt::Display for TokenKind {
                 TokenKind::Mul => "'*'",
                 TokenKind::Div => "'/'",
                 TokenKind::Mod => "'%'",
-                TokenKind::Increment => "'++'",
-                TokenKind::Decrement => "'--'",
                 TokenKind::Tilde => "'~'",
                 TokenKind::Ampersand => "'&'",
                 TokenKind::Pipe => "'|'",
@@ -123,6 +121,8 @@ impl std::fmt::Display for TokenKind {
                 TokenKind::CaretEq => "'^='",
                 TokenKind::LShiftEq => "'<<='",
                 TokenKind::RShiftEq => "'>>='",
+                TokenKind::PlusPlus => "'++'",
+                TokenKind::MinusMinus => "'--'",
             }
         )
     }

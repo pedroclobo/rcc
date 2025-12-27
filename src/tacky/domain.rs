@@ -54,7 +54,7 @@ impl std::fmt::Display for Instruction {
             Instruction::Binary(op, lhs, rhs, dst) => {
                 write!(f, "{} = {} {} {}", dst, op, lhs, rhs)
             }
-            Instruction::Copy(src, dst) => write!(f, "id {} = {}", dst, src),
+            Instruction::Copy(src, dst) => write!(f, "{} = id {}", dst, src),
             Instruction::Label(label) => write!(f, "{}: ", label),
             Instruction::Jump(label) => write!(f, "jmp {}", label),
             Instruction::JumpIfZero(value, label) => write!(f, "jz {} {}", value, label),
@@ -80,12 +80,15 @@ impl std::fmt::Display for UnaryOperator {
     }
 }
 
-impl From<parser::UnaryOperator> for UnaryOperator {
-    fn from(op: parser::UnaryOperator) -> Self {
+impl TryFrom<parser::UnaryOperator> for UnaryOperator {
+    type Error = TackyError;
+
+    fn try_from(op: parser::UnaryOperator) -> Result<Self, Self::Error> {
         match op {
-            parser::UnaryOperator::BNot => UnaryOperator::BNot,
-            parser::UnaryOperator::Neg => UnaryOperator::Neg,
-            parser::UnaryOperator::Not => UnaryOperator::Not,
+            parser::UnaryOperator::BNot => Ok(UnaryOperator::BNot),
+            parser::UnaryOperator::Neg => Ok(UnaryOperator::Neg),
+            parser::UnaryOperator::Not => Ok(UnaryOperator::Not),
+            _ => Err(TackyError::UnsupportedUnaryOperator { op }),
         }
     }
 }

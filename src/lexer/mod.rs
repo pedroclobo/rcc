@@ -167,7 +167,7 @@ impl<'a> Iterator for Lexer<'a> {
                 if let Some('+') = self.peek_char() {
                     self.next_char();
                     Ok(Token::new(
-                        TokenKind::Increment,
+                        TokenKind::PlusPlus,
                         "++",
                         Span::new(start, self.idx),
                     ))
@@ -186,7 +186,7 @@ impl<'a> Iterator for Lexer<'a> {
                 if let Some('-') = self.peek_char() {
                     self.next_char();
                     Ok(Token::new(
-                        TokenKind::Decrement,
+                        TokenKind::MinusMinus,
                         "--",
                         Span::new(start, self.idx),
                     ))
@@ -479,9 +479,9 @@ mod tests {
         assert_eq!(
             lex("-- - ++ + ~").unwrap(),
             vec![
-                tok(TokenKind::Decrement, "--"),
+                tok(TokenKind::MinusMinus, "--"),
                 tok(TokenKind::Minus, "-"),
-                tok(TokenKind::Increment, "++"),
+                tok(TokenKind::PlusPlus, "++"),
                 tok(TokenKind::Plus, "+"),
                 tok(TokenKind::Tilde, "~"),
             ]
