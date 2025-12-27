@@ -260,7 +260,7 @@ impl<'a> Parser<'a> {
                 let span = self.expect(TokenKind::Semicolon)?.span;
                 Ok(Stmt {
                     kind: StmtKind::Expr(None),
-                    span: span.clone(),
+                    span,
                 })
             }
             TokenKind::If => {
@@ -298,11 +298,11 @@ impl<'a> Parser<'a> {
             }
             _ => {
                 let expr = self.parse_expr()?;
-                let span = expr.span.clone();
+                let span = expr.span;
                 self.expect(TokenKind::Semicolon)?;
                 Ok(Stmt {
                     kind: StmtKind::Expr(Some(expr)),
-                    span: span,
+                    span,
                 })
             }
         }
@@ -364,7 +364,7 @@ impl<'a> Parser<'a> {
                     let rhs_span = rhs.span;
                     rhs = Expr {
                         kind: ExprKind::Binary(op, Box::new(lhs.clone()), Box::new(rhs)),
-                        span: rhs_span.clone(),
+                        span: rhs_span,
                     };
                     lhs = Expr {
                         kind: ExprKind::Assignment(Box::new(lhs), Box::new(rhs)),
@@ -416,14 +416,14 @@ impl<'a> Parser<'a> {
                 let constant = self.expect(TokenKind::Constant)?;
                 Ok(Expr {
                     kind: ExprKind::Constant(constant.lexeme.parse()?),
-                    span: constant.span.clone(),
+                    span: constant.span,
                 })
             }
             TokenKind::Identifier => {
                 let tok = self.expect(TokenKind::Identifier)?;
                 let expr = Expr {
                     kind: ExprKind::Var(tok.lexeme.to_string()),
-                    span: tok.span.clone(),
+                    span: tok.span,
                 };
 
                 let tok = self.peek()?;
@@ -442,7 +442,7 @@ impl<'a> Parser<'a> {
                     _ => Ok(expr),
                 }
             }
-            _ if is_prefix_op(&tok) => self.parse_prefix_expr(),
+            _ if is_prefix_op(tok) => self.parse_prefix_expr(),
             _ => Err(ParserError::ExpectedExpression {
                 got: tok.kind,
                 span: tok.span.into(),

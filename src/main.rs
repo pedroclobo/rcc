@@ -64,9 +64,9 @@ fn main() -> miette::Result<()> {
     Ok(())
 }
 
-fn run<'a>(
+fn run(
     args: &Args,
-    prog: &'a str,
+    prog: &str,
     asm_path: &std::path::Path,
     out_path: &std::path::Path,
 ) -> miette::Result<()> {

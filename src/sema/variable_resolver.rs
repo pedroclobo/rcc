@@ -40,7 +40,7 @@ impl VariableResolver {
         if self.vars.contains_key(&name) {
             return Err(SemaError::DuplicateDeclaration {
                 var: name.to_string(),
-                span: decl.span.clone().into(),
+                span: decl.span.into(),
             });
         }
         let new_name = self.make_tmp(&name);
@@ -55,7 +55,7 @@ impl VariableResolver {
                 name: new_name,
                 initializer: new_initializer,
             },
-            span: decl.span.clone(),
+            span: decl.span,
         })
     }
 
@@ -65,11 +65,11 @@ impl VariableResolver {
         match kind {
             parser::StmtKind::Return(expr) => Ok(parser::Stmt {
                 kind: parser::StmtKind::Return(self.resolve_expr(expr)?),
-                span: stmt.span.clone(),
+                span: stmt.span,
             }),
             parser::StmtKind::Expr(Some(expr)) => Ok(parser::Stmt {
                 kind: parser::StmtKind::Expr(Some(self.resolve_expr(expr)?)),
-                span: stmt.span.clone(),
+                span: stmt.span,
             }),
             parser::StmtKind::Expr(None) => Ok(stmt.clone()),
             parser::StmtKind::If { cond, then, r#else } => Ok(parser::Stmt {
@@ -82,7 +82,7 @@ impl VariableResolver {
                         None
                     },
                 },
-                span: stmt.span.clone(),
+                span: stmt.span,
             }),
         }
     }
@@ -96,7 +96,7 @@ impl VariableResolver {
                 if let Some(var) = self.vars.get(name) {
                     Ok(parser::Expr {
                         kind: parser::ExprKind::Var(var.clone()),
-                        span: expr.span.clone(),
+                        span: expr.span,
                     })
                 } else {
                     Err(SemaError::UndeclaredVariable {
@@ -121,7 +121,7 @@ impl VariableResolver {
                 } else {
                     Ok(parser::Expr {
                         kind: parser::ExprKind::Unary(*op, Box::new(self.resolve_expr(operand)?)),
-                        span: expr.span.clone(),
+                        span: expr.span,
                     })
                 }
             }
@@ -131,13 +131,13 @@ impl VariableResolver {
                     Box::new(self.resolve_expr(lhs)?),
                     Box::new(self.resolve_expr(rhs)?),
                 ),
-                span: expr.span.clone(),
+                span: expr.span,
             }),
             parser::ExprKind::Assignment(lhs, rhs) => {
                 if !matches!(lhs.kind, parser::ExprKind::Var(_)) {
                     Err(SemaError::InvalidAssignmentTarget {
                         expr: *lhs.clone(),
-                        span: lhs.span.clone().into(),
+                        span: lhs.span.into(),
                     })
                 } else {
                     Ok(parser::Expr {
@@ -145,7 +145,7 @@ impl VariableResolver {
                             Box::new(self.resolve_expr(lhs)?),
                             Box::new(self.resolve_expr(rhs)?),
                         ),
-                        span: expr.span.clone(),
+                        span: expr.span,
                     })
                 }
             }
@@ -155,7 +155,7 @@ impl VariableResolver {
                     then: Box::new(self.resolve_expr(then)?),
                     r#else: Box::new(self.resolve_expr(r#else)?),
                 },
-                span: expr.span.clone(),
+                span: expr.span,
             }),
         }
     }

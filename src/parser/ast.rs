@@ -22,9 +22,9 @@ impl Span {
     }
 }
 
-impl Into<SourceSpan> for Span {
-    fn into(self) -> SourceSpan {
-        SourceSpan::new(self.start.into(), self.end - self.start)
+impl From<Span> for SourceSpan {
+    fn from(val: Span) -> Self {
+        SourceSpan::new(val.start.into(), val.end - val.start)
     }
 }
 
