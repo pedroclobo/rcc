@@ -171,6 +171,13 @@ impl<'a> Iterator for Lexer<'a> {
                         "++",
                         Span::new(start, self.idx),
                     ))
+                } else if let Some('=') = self.peek_char() {
+                    self.next_char();
+                    Ok(Token::new(
+                        TokenKind::PlusEq,
+                        "+=",
+                        Span::new(start, self.idx),
+                    ))
                 } else {
                     Ok(Token::new(TokenKind::Plus, "+", Span::new(start, self.idx)))
                 }
@@ -183,6 +190,13 @@ impl<'a> Iterator for Lexer<'a> {
                         "--",
                         Span::new(start, self.idx),
                     ))
+                } else if let Some('=') = self.peek_char() {
+                    self.next_char();
+                    Ok(Token::new(
+                        TokenKind::MinusEq,
+                        "-=",
+                        Span::new(start, self.idx),
+                    ))
                 } else {
                     Ok(Token::new(
                         TokenKind::Minus,
@@ -191,9 +205,42 @@ impl<'a> Iterator for Lexer<'a> {
                     ))
                 }
             }
-            '*' => Ok(Token::new(TokenKind::Mul, "*", Span::new(start, self.idx))),
-            '/' => Ok(Token::new(TokenKind::Div, "/", Span::new(start, self.idx))),
-            '%' => Ok(Token::new(TokenKind::Mod, "%", Span::new(start, self.idx))),
+            '*' => {
+                if let Some('=') = self.peek_char() {
+                    self.next_char();
+                    Ok(Token::new(
+                        TokenKind::MulEq,
+                        "*=",
+                        Span::new(start, self.idx),
+                    ))
+                } else {
+                    Ok(Token::new(TokenKind::Mul, "*", Span::new(start, self.idx)))
+                }
+            }
+            '/' => {
+                if let Some('=') = self.peek_char() {
+                    self.next_char();
+                    Ok(Token::new(
+                        TokenKind::DivEq,
+                        "/=",
+                        Span::new(start, self.idx),
+                    ))
+                } else {
+                    Ok(Token::new(TokenKind::Div, "/", Span::new(start, self.idx)))
+                }
+            }
+            '%' => {
+                if let Some('=') = self.peek_char() {
+                    self.next_char();
+                    Ok(Token::new(
+                        TokenKind::ModEq,
+                        "%=",
+                        Span::new(start, self.idx),
+                    ))
+                } else {
+                    Ok(Token::new(TokenKind::Mod, "%", Span::new(start, self.idx)))
+                }
+            }
             '~' => Ok(Token::new(
                 TokenKind::Tilde,
                 "~",
@@ -203,6 +250,13 @@ impl<'a> Iterator for Lexer<'a> {
                 if let Some('&') = self.peek_char() {
                     self.next_char();
                     Ok(Token::new(TokenKind::And, "&&", Span::new(start, self.idx)))
+                } else if let Some('=') = self.peek_char() {
+                    self.next_char();
+                    Ok(Token::new(
+                        TokenKind::AmpersandEq,
+                        "&=",
+                        Span::new(start, self.idx),
+                    ))
                 } else {
                     Ok(Token::new(
                         TokenKind::Ampersand,
@@ -215,15 +269,33 @@ impl<'a> Iterator for Lexer<'a> {
                 if let Some('|') = self.peek_char() {
                     self.next_char();
                     Ok(Token::new(TokenKind::Or, "||", Span::new(start, self.idx)))
+                } else if let Some('=') = self.peek_char() {
+                    self.next_char();
+                    Ok(Token::new(
+                        TokenKind::PipeEq,
+                        "|=",
+                        Span::new(start, self.idx),
+                    ))
                 } else {
                     Ok(Token::new(TokenKind::Pipe, "|", Span::new(start, self.idx)))
                 }
             }
-            '^' => Ok(Token::new(
-                TokenKind::Caret,
-                "^",
-                Span::new(start, self.idx),
-            )),
+            '^' => {
+                if let Some('=') = self.peek_char() {
+                    self.next_char();
+                    Ok(Token::new(
+                        TokenKind::CaretEq,
+                        "^=",
+                        Span::new(start, self.idx),
+                    ))
+                } else {
+                    Ok(Token::new(
+                        TokenKind::Caret,
+                        "^",
+                        Span::new(start, self.idx),
+                    ))
+                }
+            }
             '!' => {
                 if let Some('=') = self.peek_char() {
                     self.next_char();
@@ -235,11 +307,20 @@ impl<'a> Iterator for Lexer<'a> {
             '<' => {
                 if let Some('<') = self.peek_char() {
                     self.next_char();
-                    Ok(Token::new(
-                        TokenKind::LShift,
-                        "<<",
-                        Span::new(start, self.idx),
-                    ))
+                    if let Some('=') = self.peek_char() {
+                        self.next_char();
+                        Ok(Token::new(
+                            TokenKind::LShiftEq,
+                            "<<=",
+                            Span::new(start, self.idx),
+                        ))
+                    } else {
+                        Ok(Token::new(
+                            TokenKind::LShift,
+                            "<<",
+                            Span::new(start, self.idx),
+                        ))
+                    }
                 } else if let Some('=') = self.peek_char() {
                     self.next_char();
                     Ok(Token::new(TokenKind::Le, "<=", Span::new(start, self.idx)))
@@ -250,11 +331,20 @@ impl<'a> Iterator for Lexer<'a> {
             '>' => {
                 if let Some('>') = self.peek_char() {
                     self.next_char();
-                    Ok(Token::new(
-                        TokenKind::RShift,
-                        ">>",
-                        Span::new(start, self.idx),
-                    ))
+                    if let Some('=') = self.peek_char() {
+                        self.next_char();
+                        Ok(Token::new(
+                            TokenKind::RShiftEq,
+                            ">>=",
+                            Span::new(start, self.idx),
+                        ))
+                    } else {
+                        Ok(Token::new(
+                            TokenKind::RShift,
+                            ">>",
+                            Span::new(start, self.idx),
+                        ))
+                    }
                 } else if let Some('=') = self.peek_char() {
                     self.next_char();
                     Ok(Token::new(TokenKind::Ge, ">=", Span::new(start, self.idx)))
@@ -432,5 +522,24 @@ mod tests {
     #[test]
     fn assignment() {
         assert_eq!(lex("=").unwrap(), vec![tok(TokenKind::Eq, "="),]);
+    }
+
+    #[test]
+    fn compound_assignment() {
+        assert_eq!(
+            lex("+= -= *= /= %= &= |= ^= <<= >>=").unwrap(),
+            vec![
+                tok(TokenKind::PlusEq, "+="),
+                tok(TokenKind::MinusEq, "-="),
+                tok(TokenKind::MulEq, "*="),
+                tok(TokenKind::DivEq, "/="),
+                tok(TokenKind::ModEq, "%="),
+                tok(TokenKind::AmpersandEq, "&="),
+                tok(TokenKind::PipeEq, "|="),
+                tok(TokenKind::CaretEq, "^="),
+                tok(TokenKind::LShiftEq, "<<="),
+                tok(TokenKind::RShiftEq, ">>="),
+            ]
+        );
     }
 }

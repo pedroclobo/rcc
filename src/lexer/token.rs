@@ -62,6 +62,16 @@ pub enum TokenKind {
     Le,
     Ge,
     Eq,
+    PlusEq,
+    MinusEq,
+    MulEq,
+    DivEq,
+    ModEq,
+    AmpersandEq,
+    PipeEq,
+    CaretEq,
+    LShiftEq,
+    RShiftEq,
 }
 
 impl std::fmt::Display for TokenKind {
@@ -103,6 +113,16 @@ impl std::fmt::Display for TokenKind {
                 TokenKind::Le => "'<='",
                 TokenKind::Ge => "'>='",
                 TokenKind::Eq => "'='",
+                TokenKind::PlusEq => "'+='",
+                TokenKind::MinusEq => "'-='",
+                TokenKind::MulEq => "'*='",
+                TokenKind::DivEq => "'/='",
+                TokenKind::ModEq => "'%='",
+                TokenKind::AmpersandEq => "'&='",
+                TokenKind::PipeEq => "'|='",
+                TokenKind::CaretEq => "'^='",
+                TokenKind::LShiftEq => "'<<='",
+                TokenKind::RShiftEq => "'>>='",
             }
         )
     }

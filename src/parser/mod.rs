@@ -14,7 +14,7 @@ use std::iter::Peekable;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Precedence {
     None,
-    Assignment,     // =
+    Assignment,     // =, +=, -=, *=, /=, %=, &=, |=, ^=, <<=, >>=
     LogicalOr,      // ||
     LogicalAnd,     // &&
     BitwiseOr,      // |
@@ -26,6 +26,26 @@ enum Precedence {
     Additive,       // +, -
     Multiplicative, // *, /, %
     Highest,
+}
+
+impl Precedence {
+    fn increment(self) -> Self {
+        match self {
+            Precedence::None => Precedence::Assignment,
+            Precedence::Assignment => Precedence::LogicalOr,
+            Precedence::LogicalOr => Precedence::LogicalAnd,
+            Precedence::LogicalAnd => Precedence::BitwiseOr,
+            Precedence::BitwiseOr => Precedence::BitwiseXor,
+            Precedence::BitwiseXor => Precedence::BitwiseAnd,
+            Precedence::BitwiseAnd => Precedence::Equality,
+            Precedence::Equality => Precedence::Relational,
+            Precedence::Relational => Precedence::Shift,
+            Precedence::Shift => Precedence::Additive,
+            Precedence::Additive => Precedence::Multiplicative,
+            Precedence::Multiplicative => Precedence::Highest,
+            Precedence::Highest => Precedence::Highest,
+        }
+    }
 }
 
 fn is_binop(token: &Token) -> bool {
@@ -52,24 +72,21 @@ fn is_binop(token: &Token) -> bool {
     )
 }
 
-impl Precedence {
-    fn increment(self) -> Self {
-        match self {
-            Precedence::None => Precedence::Assignment,
-            Precedence::Assignment => Precedence::LogicalOr,
-            Precedence::LogicalOr => Precedence::LogicalAnd,
-            Precedence::LogicalAnd => Precedence::BitwiseOr,
-            Precedence::BitwiseOr => Precedence::BitwiseXor,
-            Precedence::BitwiseXor => Precedence::BitwiseAnd,
-            Precedence::BitwiseAnd => Precedence::Equality,
-            Precedence::Equality => Precedence::Relational,
-            Precedence::Relational => Precedence::Shift,
-            Precedence::Shift => Precedence::Additive,
-            Precedence::Additive => Precedence::Multiplicative,
-            Precedence::Multiplicative => Precedence::Highest,
-            Precedence::Highest => Precedence::Highest,
-        }
-    }
+fn is_assignment(token: &Token) -> bool {
+    matches!(
+        token.kind,
+        TokenKind::Eq
+            | TokenKind::PlusEq
+            | TokenKind::MinusEq
+            | TokenKind::MulEq
+            | TokenKind::DivEq
+            | TokenKind::ModEq
+            | TokenKind::AmpersandEq
+            | TokenKind::PipeEq
+            | TokenKind::CaretEq
+            | TokenKind::LShiftEq
+            | TokenKind::RShiftEq
+    )
 }
 
 pub struct Parser<'a> {
@@ -241,18 +258,21 @@ impl<'a> Parser<'a> {
     }
 
     fn precedence(token: &Token) -> Precedence {
+        use TokenKind::*;
+
         match token.kind {
-            TokenKind::Mul | TokenKind::Div | TokenKind::Mod => Precedence::Multiplicative,
-            TokenKind::Plus | TokenKind::Minus => Precedence::Additive,
-            TokenKind::LShift | TokenKind::RShift => Precedence::Shift,
-            TokenKind::Lt | TokenKind::Gt | TokenKind::Le | TokenKind::Ge => Precedence::Relational,
-            TokenKind::EqEq | TokenKind::Neq => Precedence::Equality,
-            TokenKind::Ampersand => Precedence::BitwiseAnd,
-            TokenKind::Caret => Precedence::BitwiseXor,
-            TokenKind::Pipe => Precedence::BitwiseOr,
-            TokenKind::And => Precedence::LogicalAnd,
-            TokenKind::Or => Precedence::LogicalOr,
-            TokenKind::Eq => Precedence::Assignment,
+            Mul | Div | Mod => Precedence::Multiplicative,
+            Plus | Minus => Precedence::Additive,
+            LShift | RShift => Precedence::Shift,
+            Lt | Gt | Le | Ge => Precedence::Relational,
+            EqEq | Neq => Precedence::Equality,
+            Ampersand => Precedence::BitwiseAnd,
+            Caret => Precedence::BitwiseXor,
+            Pipe => Precedence::BitwiseOr,
+            And => Precedence::LogicalAnd,
+            Or => Precedence::LogicalOr,
+            Eq | PlusEq | MinusEq | MulEq | DivEq | ModEq | AmpersandEq | CaretEq | PipeEq
+            | LShiftEq | RShiftEq => Precedence::Assignment,
             _ => Precedence::None,
         }
     }
@@ -269,7 +289,7 @@ impl<'a> Parser<'a> {
 
         while let Ok(token) = self.peek()
             && Self::precedence(token) >= precedence
-            && (is_binop(token) || matches!(token.kind, TokenKind::Eq))
+            && (is_binop(token) || is_assignment(token))
         {
             match token.kind {
                 TokenKind::Eq => {
@@ -277,6 +297,23 @@ impl<'a> Parser<'a> {
                     self.next()?;
 
                     let rhs = self._parse_expr(precedence)?;
+                    lhs = Expr {
+                        kind: ExprKind::Assignment(Box::new(lhs), Box::new(rhs)),
+                        // TODO: should probably merge here
+                        span: span.clone(),
+                    }
+                }
+                _ if is_assignment(token) => {
+                    let op = BinaryOperator::try_from(token)?;
+                    let precedence = Self::precedence(token);
+                    self.next()?;
+
+                    let mut rhs = self._parse_expr(precedence)?;
+                    let span = rhs.span;
+                    rhs = Expr {
+                        kind: ExprKind::Binary(op, Box::new(lhs.clone()), Box::new(rhs)),
+                        span: span,
+                    };
                     lhs = Expr {
                         kind: ExprKind::Assignment(Box::new(lhs), Box::new(rhs)),
                         // TODO: should probably merge here
@@ -629,5 +666,86 @@ mod tests {
         let expr = parser.parse_expr().unwrap();
 
         assert_eq!(expr, assign!(var!("a"), assign!(var!("b"), constant!(3))));
+    }
+
+    #[test]
+    fn compound_assignment() {
+        let mut parser = Parser::new("a += b -= c *= d /= e %= f &= g ^= h |= i <<= j >>= k");
+        let expr = parser.parse_expr().unwrap();
+
+        assert_eq!(
+            expr,
+            assign!(
+                var!("a"),
+                binary!(
+                    BinaryOperator::Add,
+                    var!("a"),
+                    assign!(
+                        var!("b"),
+                        binary!(
+                            BinaryOperator::Sub,
+                            var!("b"),
+                            assign!(
+                                var!("c"),
+                                binary!(
+                                    BinaryOperator::Mul,
+                                    var!("c"),
+                                    assign!(
+                                        var!("d"),
+                                        binary!(
+                                            BinaryOperator::Div,
+                                            var!("d"),
+                                            assign!(
+                                                var!("e"),
+                                                binary!(
+                                                    BinaryOperator::Mod,
+                                                    var!("e"),
+                                                    assign!(
+                                                        var!("f"),
+                                                        binary!(
+                                                            BinaryOperator::BAnd,
+                                                            var!("f"),
+                                                            assign!(
+                                                                var!("g"),
+                                                                binary!(
+                                                                    BinaryOperator::Xor,
+                                                                    var!("g"),
+                                                                    assign!(
+                                                                        var!("h"),
+                                                                        binary!(
+                                                                            BinaryOperator::BOr,
+                                                                            var!("h"),
+                                                                            assign!(
+                                                                                var!("i"),
+                                                                                binary!(
+                                                                                    BinaryOperator::LShift,
+                                                                                    var!("i"),
+                                                                                    assign!(
+                                                                                        var!("j"),
+                                                                                        binary!(
+                                                                                            BinaryOperator::RShift,
+                                                                                            var!("j"),
+                                                                                            var!("k")
+                                                                                        )
+                                                                                    )
+                                                                                )
+                                                                            )
+                                                                        )
+                                                                    )
+                                                                )
+                                                            )
+                                                        )
+                                                    )
+                                                )
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        );
     }
 }
