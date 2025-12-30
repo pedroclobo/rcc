@@ -273,7 +273,11 @@ impl<'a> Parser<'a> {
                 let then = self.parse_stmt()?;
                 let then_end = then.span.end;
 
-                if matches!(self.peek()?.kind, TokenKind::Else) {
+                if let Some(Ok(Token {
+                    kind: TokenKind::Else,
+                    ..
+                })) = self.lexer.peek()
+                {
                     self.next()?;
                     let r#else = self.parse_stmt()?;
                     let else_end = r#else.span.end;
@@ -426,10 +430,14 @@ impl<'a> Parser<'a> {
                     span: tok.span,
                 };
 
-                let tok = self.peek()?;
-                match tok.kind {
-                    TokenKind::PlusPlus | TokenKind::MinusMinus => self.parse_postfix_expr(expr),
-                    _ => Ok(expr),
+                if let Some(Ok(Token {
+                    kind: TokenKind::PlusPlus | TokenKind::MinusMinus,
+                    ..
+                })) = self.lexer.peek()
+                {
+                    self.parse_postfix_expr(expr)
+                } else {
+                    Ok(expr)
                 }
             }
             TokenKind::LParen => {
@@ -609,6 +617,7 @@ mod tests {
     fn return_0() {
         let mut parser = Parser::new("int main(void) { return 0; }");
         let ast = parser.parse().unwrap();
+        assert!(parser.lexer.next().is_none());
 
         assert_eq!(ast.functions.len(), 1);
         assert_eq!(ast.functions[0].name, "main");
@@ -622,6 +631,7 @@ mod tests {
     fn return_2() {
         let mut parser = Parser::new("int main(void) { return 2; }");
         let ast = parser.parse().unwrap();
+        assert!(parser.lexer.next().is_none());
 
         assert_eq!(ast.functions.len(), 1);
         assert_eq!(ast.functions[0].name, "main");
@@ -635,6 +645,7 @@ mod tests {
     fn return_minus_2() {
         let mut parser = Parser::new("int main(void) { return -2; }");
         let ast = parser.parse().unwrap();
+        assert!(parser.lexer.next().is_none());
 
         assert_eq!(ast.functions.len(), 1);
         assert_eq!(ast.functions[0].name, "main");
@@ -651,6 +662,7 @@ mod tests {
     fn return_neg_2() {
         let mut parser = Parser::new("int main(void) { return ~2; }");
         let ast = parser.parse().unwrap();
+        assert!(parser.lexer.next().is_none());
 
         assert_eq!(ast.functions.len(), 1);
         assert_eq!(ast.functions[0].name, "main");
@@ -667,6 +679,7 @@ mod tests {
     fn return_neg_minus_2() {
         let mut parser = Parser::new("int main(void) { return ~(-2); }");
         let ast = parser.parse().unwrap();
+        assert!(parser.lexer.next().is_none());
 
         assert_eq!(ast.functions.len(), 1);
         assert_eq!(ast.functions[0].name, "main");
@@ -683,6 +696,7 @@ mod tests {
     fn left_associativity() {
         let mut parser = Parser::new("1 + 2 - 3");
         let expr = parser.parse_expr().unwrap();
+        assert!(parser.lexer.next().is_none());
 
         assert_eq!(
             expr,
@@ -698,6 +712,7 @@ mod tests {
     fn precedence() {
         let mut parser = Parser::new("1 + 2 * 3");
         let expr = parser.parse_expr().unwrap();
+        assert!(parser.lexer.next().is_none());
 
         assert_eq!(
             expr,
@@ -713,6 +728,7 @@ mod tests {
     fn bitwise() {
         let mut parser = Parser::new("1 << 2 & 3 ^ 4 | 5");
         let expr = parser.parse_expr().unwrap();
+        assert!(parser.lexer.next().is_none());
 
         assert_eq!(
             expr,
@@ -736,6 +752,7 @@ mod tests {
     fn logical_and_comparison() {
         let mut parser = Parser::new("1 < 2 && 3 || 4");
         let expr = parser.parse_expr().unwrap();
+        assert!(parser.lexer.next().is_none());
 
         assert_eq!(
             expr,
@@ -755,6 +772,7 @@ mod tests {
     fn bang() {
         let mut parser = Parser::new("!1");
         let expr = parser.parse_expr().unwrap();
+        assert!(parser.lexer.next().is_none());
 
         assert_eq!(expr, unary!(UnaryOperator::Not, constant!(1)));
     }
@@ -763,6 +781,7 @@ mod tests {
     fn decl() {
         let mut parser = Parser::new("int i;");
         let decl = parser.parse_decl().unwrap();
+        assert!(parser.lexer.next().is_none());
 
         assert_eq!(decl, decl!("i"));
     }
@@ -771,6 +790,7 @@ mod tests {
     fn decl_with_initializer() {
         let mut parser = Parser::new("int i = 3 + 1;");
         let decl = parser.parse_decl().unwrap();
+        assert!(parser.lexer.next().is_none());
 
         assert_eq!(
             decl,
@@ -785,14 +805,16 @@ mod tests {
     fn assignment_precedence() {
         let mut parser = Parser::new("a = b = 3");
         let expr = parser.parse_expr().unwrap();
+        assert!(parser.lexer.next().is_none());
 
         assert_eq!(expr, assign!(var!("a"), assign!(var!("b"), constant!(3))));
     }
 
     #[test]
     fn compound_assignment() {
-        let mut parser = Parser::new("a += b -= c *= d /= e %= f &= g ^= h |= i <<= j >>= k;");
+        let mut parser = Parser::new("a += b -= c *= d /= e %= f &= g ^= h |= i <<= j >>= k");
         let expr = parser.parse_expr().unwrap();
+        assert!(parser.lexer.next().is_none());
 
         assert_eq!(
             expr,
@@ -872,20 +894,17 @@ mod tests {
 
     #[test]
     fn pre_incr_decr() {
-        let mut parser = Parser::new("--a + ++b - 1");
+        let mut parser = Parser::new("--a + ++b");
         let expr = parser.parse_expr().unwrap();
+        assert!(parser.lexer.next().is_none());
 
         assert_eq!(
             expr,
             binary!(
-                BinaryOperator::Sub,
-                binary!(
-                    BinaryOperator::Add,
-                    unary!(UnaryOperator::PreDec, var!("a")),
-                    unary!(UnaryOperator::PreInc, var!("b"))
-                ),
-                constant!(1)
-            )
+                BinaryOperator::Add,
+                unary!(UnaryOperator::PreDec, var!("a")),
+                unary!(UnaryOperator::PreInc, var!("b"))
+            ),
         );
     }
 
@@ -893,6 +912,7 @@ mod tests {
     fn post_incr_decr() {
         let mut parser = Parser::new("a-- + b++");
         let expr = parser.parse_expr().unwrap();
+        assert!(parser.lexer.next().is_none());
 
         assert_eq!(
             expr,
@@ -908,6 +928,7 @@ mod tests {
     fn post_incr_paren() {
         let mut parser = Parser::new("!(a)++");
         let expr = parser.parse_expr().unwrap();
+        assert!(parser.lexer.next().is_none());
 
         assert_eq!(
             expr,
@@ -925,9 +946,10 @@ mod tests {
         if (a > 10)
             return a;
         else
-            return 10 - a;;",
+            return 10 - a;",
         );
         let stmt = parser.parse_stmt().unwrap();
+        assert!(parser.lexer.next().is_none());
 
         assert_eq!(
             stmt,
@@ -950,6 +972,7 @@ mod tests {
     fn conditional_expr() {
         let mut parser = Parser::new("a ? 1 : 0");
         let expr = parser.parse_expr().unwrap();
+        assert!(parser.lexer.next().is_none());
 
         assert_eq!(expr, if_expr!(var!("a"), constant!(1), constant!(0)))
     }
