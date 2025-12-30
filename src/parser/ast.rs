@@ -3,7 +3,7 @@ use miette::SourceSpan;
 use super::ParserError;
 use crate::lexer::{Token, TokenKind};
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
 pub struct Span {
     pub start: usize,
     pub end: usize,
@@ -100,7 +100,26 @@ pub enum StmtKind {
         then: Box<Stmt>,
         r#else: Option<Box<Stmt>>,
     },
+    Labeled {
+        label: Label,
+        stmt: Box<Stmt>,
+    },
+    Goto(Label),
 }
+
+#[derive(Debug, Clone)]
+pub struct Label {
+    pub name: String,
+    pub span: Span,
+}
+
+impl PartialEq for Label {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+    }
+}
+
+impl Eq for Label {}
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum UnaryOperator {

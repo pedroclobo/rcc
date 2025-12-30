@@ -163,6 +163,14 @@ impl<'a> TackyEmitter<'a> {
                 self.instructions
                     .extend(vec![Instruction::Label(end_label)]);
             }
+            parser::StmtKind::Labeled { label, stmt } => {
+                self.instructions
+                    .push(Instruction::Label(label.name.clone()));
+                self.visit_stmt(*stmt)?;
+            }
+            parser::StmtKind::Goto(label) => self
+                .instructions
+                .push(Instruction::Jump(label.name.clone())),
         };
 
         Ok(())

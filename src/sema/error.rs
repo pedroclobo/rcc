@@ -21,10 +21,26 @@ pub enum SemaError {
         span: SourceSpan,
     },
 
-    #[diagnostic(code(sema::duplicate_declaration))]
+    #[diagnostic(code(sema::duplicate_variable_declaration))]
     #[error("Duplicate declaration of variable '{var}'")]
-    DuplicateDeclaration {
+    DuplicateVariableDeclaration {
         var: String,
+        #[label]
+        span: SourceSpan,
+    },
+
+    #[diagnostic(code(sema::undeclared_label))]
+    #[error("Label '{label}' not declared")]
+    UndeclaredLabel {
+        label: String,
+        #[label]
+        span: SourceSpan,
+    },
+
+    #[diagnostic(code(sema::duplicate_label_declaration))]
+    #[error("Duplicate declaration of label '{label}'")]
+    DuplicateLabelDeclaration {
+        label: String,
         #[label]
         span: SourceSpan,
     },

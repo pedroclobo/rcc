@@ -7,7 +7,10 @@ pub use ast::{
 };
 pub use error::ParserError;
 
-use crate::lexer::{Lexer, Token, TokenKind};
+use crate::{
+    lexer::{Lexer, Token, TokenKind},
+    parser::ast::Label,
+};
 
 use std::iter::Peekable;
 
@@ -243,9 +246,11 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // <stmt> ::= "return" <exp> ";" | <exp> ";" | "if" "(" <exp> ")" <stmt> [ "else" <stmt> ] ";" | ";"
+    // <stmt> ::= "return" <exp> ";" | <exp> ";" | "if" "(" <exp> ")" <stmt> [ "else" <stmt> ] ";" | <label>: | "goto" <label> ";" | ";"
     fn parse_stmt(&mut self) -> Result<Stmt, ParserError> {
-        match self.peek()?.kind {
+        let tok = self.peek()?;
+
+        match tok.kind {
             TokenKind::Return => {
                 let start = self.expect(TokenKind::Return)?.span.start;
                 let expr = self.parse_expr()?;
@@ -261,6 +266,22 @@ impl<'a> Parser<'a> {
                 Ok(Stmt {
                     kind: StmtKind::Expr(None),
                     span,
+                })
+            }
+            TokenKind::Goto => {
+                let start = tok.span.start;
+                self.expect(TokenKind::Goto)?;
+
+                let id = self.expect(TokenKind::Identifier)?;
+                let label = Label {
+                    name: id.lexeme.to_string(),
+                    span: id.span,
+                };
+                let end = self.expect(TokenKind::Semicolon)?.span.end;
+
+                Ok(Stmt {
+                    kind: StmtKind::Goto(label),
+                    span: Span::new(start, end),
                 })
             }
             TokenKind::If => {
@@ -301,13 +322,47 @@ impl<'a> Parser<'a> {
                 }
             }
             _ => {
-                let expr = self.parse_expr()?;
-                let span = expr.span;
-                self.expect(TokenKind::Semicolon)?;
-                Ok(Stmt {
-                    kind: StmtKind::Expr(Some(expr)),
-                    span,
-                })
+                let is_label = {
+                    let mut lookahead = self.lexer.clone();
+                    lookahead.next();
+                    matches!(
+                        lookahead.peek(),
+                        Some(Ok(Token {
+                            kind: TokenKind::Colon,
+                            ..
+                        }))
+                    )
+                };
+
+                if is_label {
+                    let id = self.expect(TokenKind::Identifier)?;
+                    let name = id.lexeme.to_string();
+
+                    self.expect(TokenKind::Colon)?;
+
+                    let stmt = self.parse_stmt()?;
+                    let end = stmt.span.end;
+
+                    Ok(Stmt {
+                        kind: StmtKind::Labeled {
+                            label: Label {
+                                name,
+                                span: id.span,
+                            },
+                            stmt: Box::new(stmt),
+                        },
+                        span: Span::new(id.span.start, end),
+                    })
+                } else {
+                    let expr = self.parse_expr()?;
+                    let span = expr.span;
+
+                    self.expect(TokenKind::Semicolon)?;
+                    Ok(Stmt {
+                        kind: StmtKind::Expr(Some(expr)),
+                        span,
+                    })
+                }
             }
         }
     }
@@ -589,6 +644,30 @@ mod tests {
                 then: Box::new($then),
                 r#else: Some(Box::new($else))
             })
+        };
+    }
+
+    macro_rules! label {
+        ($name:expr) => {
+            Label {
+                name: $name.to_string(),
+                span: dummy_span!(),
+            }
+        };
+    }
+
+    macro_rules! labeled_stmt {
+        ($label:expr, $stmt:expr) => {
+            stmt!(StmtKind::Labeled {
+                label: label!($label),
+                stmt: Box::new($stmt),
+            })
+        };
+    }
+
+    macro_rules! goto_stmt {
+        ($label:expr) => {
+            stmt!(StmtKind::Goto(label!($label)))
         };
     }
 
@@ -975,5 +1054,23 @@ mod tests {
         assert!(parser.lexer.next().is_none());
 
         assert_eq!(expr, if_expr!(var!("a"), constant!(1), constant!(0)))
+    }
+
+    #[test]
+    fn labeled_stmt() {
+        let mut parser = Parser::new("label: return 1;");
+        let stmt = parser.parse_stmt().unwrap();
+        assert!(parser.lexer.next().is_none());
+
+        assert_eq!(stmt, labeled_stmt!("label", return_stmt!(constant!(1))))
+    }
+
+    #[test]
+    fn goto_stmt() {
+        let mut parser = Parser::new("goto label;");
+        let expr = parser.parse_stmt().unwrap();
+        assert!(parser.lexer.next().is_none());
+
+        assert_eq!(expr, goto_stmt!("label"))
     }
 }

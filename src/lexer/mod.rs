@@ -9,6 +9,7 @@ pub use error::LexerError;
 
 use crate::parser::Span;
 
+#[derive(Debug, Clone)]
 pub struct Lexer<'a> {
     input: &'a str,
     chars: Peekable<Chars<'a>>,
@@ -379,7 +380,7 @@ impl<'a> Iterator for Lexer<'a> {
                 .consume_constant()
                 .map(|lexeme| Token::new(TokenKind::Constant, lexeme, Span::new(start, self.idx))),
 
-            c if c.is_alphanumeric() => match self.consume_identifier() {
+            c if c.is_alphanumeric() || c == '_' => match self.consume_identifier() {
                 "return" => Ok(Token::new(
                     TokenKind::Return,
                     "return",
@@ -399,6 +400,11 @@ impl<'a> Iterator for Lexer<'a> {
                 "else" => Ok(Token::new(
                     TokenKind::Else,
                     "else",
+                    Span::new(start, self.idx),
+                )),
+                "goto" => Ok(Token::new(
+                    TokenKind::Goto,
+                    "goto",
                     Span::new(start, self.idx),
                 )),
                 id => Ok(Token::new(
@@ -568,6 +574,18 @@ mod tests {
                 tok(TokenKind::Else, "else"),
                 tok(TokenKind::QMark, "?"),
                 tok(TokenKind::Colon, ":"),
+            ]
+        );
+    }
+
+    #[test]
+    fn goto() {
+        assert_eq!(
+            lex("goto _label;").unwrap(),
+            vec![
+                tok(TokenKind::Goto, "goto"),
+                tok(TokenKind::Identifier, "_label"),
+                tok(TokenKind::Semicolon, ";"),
             ]
         );
     }
