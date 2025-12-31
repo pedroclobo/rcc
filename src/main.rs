@@ -114,7 +114,7 @@ fn run(
         return Ok(());
     }
 
-    let mut sema = rcc::sema::VariableResolver::new();
+    let mut sema = rcc::sema::Sema::new();
     sema.run(&mut ast)
         .map_err(|e| miette::Report::new(e).with_source_code(source.clone()))?;
     if args.validate {

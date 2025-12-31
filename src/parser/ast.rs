@@ -149,6 +149,31 @@ pub enum StmtKind {
     },
     Goto(Label),
     Block(Block),
+    Break(Option<Label>),
+    Continue(Option<Label>),
+    While {
+        cond: Expr,
+        body: Box<Stmt>,
+        label: Option<Label>,
+    },
+    DoWhile {
+        body: Box<Stmt>,
+        cond: Expr,
+        label: Option<Label>,
+    },
+    For {
+        init: ForInit,
+        cond: Option<Expr>,
+        post: Option<Expr>,
+        body: Box<Stmt>,
+        label: Option<Label>,
+    },
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub enum ForInit {
+    Decl(Decl),
+    Expr(Option<Expr>),
 }
 
 #[derive(Debug, Clone)]

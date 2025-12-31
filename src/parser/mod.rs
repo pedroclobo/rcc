@@ -2,14 +2,14 @@ mod ast;
 mod error;
 
 pub use ast::{
-    BinaryOperator, BlockItem, Decl, DeclKind, Expr, ExprKind, FunctionDefinition, Program, Span,
-    Stmt, StmtKind, UnaryOperator,
+    BinaryOperator, BlockItem, Decl, DeclKind, Expr, ExprKind, ForInit, FunctionDefinition, Label,
+    Program, Span, Stmt, StmtKind, UnaryOperator,
 };
 pub use error::ParserError;
 
 use crate::{
     lexer::{Lexer, Token, TokenKind},
-    parser::ast::{Block, Label},
+    parser::ast::Block,
 };
 
 use std::{collections::VecDeque, iter::Peekable};
@@ -265,6 +265,11 @@ impl<'a> Parser<'a> {
     //            <label>:
     //            <block> |
     //            "goto" <label> ";" |
+    //            "break" ";" |
+    //            "continue" ";" |
+    //            "while" "(" <exp> ")" <stmt> |
+    //            "do" <statement> "while" "(" <exp> ")" ";" |
+    //            "for" "(" <for-init> [ <exp> ] ";" [ <exp> ] ")" <stmt> |
     //            ";"
     fn parse_stmt(&mut self) -> Result<Stmt, ParserError> {
         let tok = self.peek()?;
@@ -294,6 +299,97 @@ impl<'a> Parser<'a> {
                 Ok(Stmt {
                     kind: StmtKind::Expr(None),
                     span,
+                })
+            }
+            TokenKind::Break => {
+                let span = self.expect(TokenKind::Break)?.span;
+                self.expect(TokenKind::Semicolon)?;
+                Ok(Stmt {
+                    kind: StmtKind::Break(None),
+                    span,
+                })
+            }
+            TokenKind::Continue => {
+                let span = self.expect(TokenKind::Continue)?.span;
+                self.expect(TokenKind::Semicolon)?;
+                Ok(Stmt {
+                    kind: StmtKind::Continue(None),
+                    span,
+                })
+            }
+            TokenKind::While => {
+                let start = self.expect(TokenKind::While)?.span.start;
+
+                self.expect(TokenKind::LParen)?;
+                let cond = self.parse_expr()?;
+                self.expect(TokenKind::RParen)?;
+                let body = self.parse_stmt()?;
+
+                let end = body.span.end;
+
+                Ok(Stmt {
+                    kind: StmtKind::While {
+                        cond,
+                        body: Box::new(body),
+                        label: None,
+                    },
+                    span: Span::new(start, end),
+                })
+            }
+            TokenKind::Do => {
+                let start = self.expect(TokenKind::Do)?.span.start;
+                let body = self.parse_stmt()?;
+                self.expect(TokenKind::While)?;
+                self.expect(TokenKind::LParen)?;
+                let cond = self.parse_expr()?;
+                self.expect(TokenKind::RParen)?;
+                let end = self.expect(TokenKind::Semicolon)?.span.end;
+
+                Ok(Stmt {
+                    kind: StmtKind::DoWhile {
+                        body: Box::new(body),
+                        cond,
+                        label: None,
+                    },
+                    span: Span::new(start, end),
+                })
+            }
+            TokenKind::For => {
+                let start = self.expect(TokenKind::For)?.span.start;
+                self.expect(TokenKind::LParen)?;
+
+                let init = self.parse_for_init()?;
+
+                let cond = if matches!(self.peek()?.kind, TokenKind::Semicolon) {
+                    self.next()?;
+                    None
+                } else {
+                    let cond = self.parse_expr()?;
+                    self.expect(TokenKind::Semicolon)?;
+                    Some(cond)
+                };
+
+                let post = if matches!(self.peek()?.kind, TokenKind::RParen) {
+                    self.next()?;
+                    None
+                } else {
+                    let post = self.parse_expr()?;
+                    self.expect(TokenKind::RParen)?;
+                    Some(post)
+                };
+
+                let body = self.parse_stmt()?;
+                let end = body.span.end;
+
+                Ok(Stmt {
+                    kind: StmtKind::For {
+                        init,
+                        cond,
+                        post,
+                        body: Box::new(body),
+                        label: None,
+                    },
+                    span: Span::new(start, end),
                 })
             }
             TokenKind::Goto => {
@@ -391,6 +487,22 @@ impl<'a> Parser<'a> {
                         span,
                     })
                 }
+            }
+        }
+    }
+
+    // <for-init> ::= <declaration> | [ <exp> ] ";"
+    fn parse_for_init(&mut self) -> Result<ForInit, ParserError> {
+        match self.peek()?.kind {
+            TokenKind::Int => Ok(ForInit::Decl(self.parse_decl()?)),
+            TokenKind::Semicolon => {
+                self.expect(TokenKind::Semicolon)?;
+                Ok(ForInit::Expr(None))
+            }
+            _ => {
+                let expr = self.parse_expr()?;
+                self.expect(TokenKind::Semicolon)?;
+                Ok(ForInit::Expr(Some(expr)))
             }
         }
     }
@@ -702,6 +814,50 @@ mod tests {
     macro_rules! block_stmt {
         ($($item:expr),* $(,)?) => {
             stmt!(StmtKind::Block(block![$(BlockItem::Stmt($item)),*]))
+        };
+    }
+
+    macro_rules! while_stmt {
+        ($cond:expr, $body:expr) => {
+            stmt!(StmtKind::While {
+                cond: $cond,
+                body: Box::new($body),
+                label: None,
+            })
+        };
+    }
+
+    macro_rules! do_while_stmt {
+        ($body:expr, $cond:expr) => {
+            stmt!(StmtKind::DoWhile {
+                body: Box::new($body),
+                cond: $cond,
+                label: None,
+            })
+        };
+    }
+
+    macro_rules! for_stmt {
+        ($init:expr, $cond:expr, $post:expr, $body:expr) => {
+            stmt!(StmtKind::For {
+                init: $init,
+                cond: $cond,
+                post: $post,
+                body: Box::new($body),
+                label: None,
+            })
+        };
+    }
+
+    macro_rules! break_stmt {
+        () => {
+            stmt!(StmtKind::Break(None))
+        };
+    }
+
+    macro_rules! continue_stmt {
+        () => {
+            stmt!(StmtKind::Continue(None))
         };
     }
 
@@ -1126,6 +1282,112 @@ mod tests {
         assert_eq!(
             stmt,
             block_stmt!(return_stmt!(constant!(1)), return_stmt!(constant!(2)))
+        );
+    }
+
+    #[test]
+    fn while_loop() {
+        let mut parser = Parser::new("while (x < 10) x = x + 1;");
+        let stmt = parser.parse_stmt().unwrap();
+        assert!(parser.lexer.next().is_none());
+
+        assert_eq!(
+            stmt,
+            while_stmt!(
+                binary!(BinaryOperator::Lt, var!("x"), constant!(10)),
+                stmt!(StmtKind::Expr(Some(assign!(
+                    var!("x"),
+                    binary!(BinaryOperator::Add, var!("x"), constant!(1))
+                ))))
+            )
+        );
+    }
+
+    #[test]
+    fn do_while_loop() {
+        let mut parser = Parser::new("do { x = x + 1; } while (x < 10);");
+        let stmt = parser.parse_stmt().unwrap();
+        assert!(parser.lexer.next().is_none());
+
+        assert_eq!(
+            stmt,
+            do_while_stmt!(
+                block_stmt!(stmt!(StmtKind::Expr(Some(assign!(
+                    var!("x"),
+                    binary!(BinaryOperator::Add, var!("x"), constant!(1))
+                ))))),
+                binary!(BinaryOperator::Lt, var!("x"), constant!(10))
+            )
+        );
+    }
+
+    #[test]
+    fn for_loop() {
+        let mut parser = Parser::new("for (int i = 0; i < 10; i = i + 1) break;");
+        let stmt = parser.parse_stmt().unwrap();
+        assert!(parser.lexer.next().is_none());
+
+        assert_eq!(
+            stmt,
+            for_stmt!(
+                ForInit::Decl(decl!("i", constant!(0))),
+                Some(binary!(BinaryOperator::Lt, var!("i"), constant!(10))),
+                Some(assign!(
+                    var!("i"),
+                    binary!(BinaryOperator::Add, var!("i"), constant!(1))
+                )),
+                break_stmt!()
+            )
+        );
+    }
+
+    #[test]
+    fn for_loop_with_expression_init() {
+        let mut parser = Parser::new("for (i = 0; i < 5; ++i) continue;");
+        let stmt = parser.parse_stmt().unwrap();
+        assert!(parser.lexer.next().is_none());
+
+        assert_eq!(
+            stmt,
+            for_stmt!(
+                ForInit::Expr(Some(assign!(var!("i"), constant!(0)))),
+                Some(binary!(BinaryOperator::Lt, var!("i"), constant!(5))),
+                Some(unary!(UnaryOperator::PreInc, var!("i"))),
+                continue_stmt!()
+            )
+        );
+    }
+
+    #[test]
+    fn for_loop_empty_parts() {
+        let mut parser = Parser::new("for (;;) break;");
+        let stmt = parser.parse_stmt().unwrap();
+        assert!(parser.lexer.next().is_none());
+
+        assert_eq!(
+            stmt,
+            for_stmt!(ForInit::Expr(None), None, None, break_stmt!())
+        );
+    }
+
+    #[test]
+    fn while_with_break_and_continue() {
+        let mut parser = Parser::new("while (1) { if (x > 5) break; continue; }");
+        let stmt = parser.parse_stmt().unwrap();
+        assert!(parser.lexer.next().is_none());
+
+        assert_eq!(
+            stmt,
+            while_stmt!(
+                constant!(1),
+                block_stmt!(
+                    if_stmt!(
+                        binary!(BinaryOperator::Gt, var!("x"), constant!(5)),
+                        break_stmt!()
+                    ),
+                    continue_stmt!()
+                )
+            )
         );
     }
 }

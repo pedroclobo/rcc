@@ -44,4 +44,18 @@ pub enum SemaError {
         #[label]
         span: SourceSpan,
     },
+
+    #[diagnostic(code(sema::break_outside_loop))]
+    #[error("'break' statement outside of loop")]
+    BreakOutsideLoop {
+        #[label]
+        span: SourceSpan,
+    },
+
+    #[diagnostic(code(sema::continue_outside_loop))]
+    #[error("'continue' statement outside of loop")]
+    ContinueOutsideLoop {
+        #[label]
+        span: SourceSpan,
+    },
 }

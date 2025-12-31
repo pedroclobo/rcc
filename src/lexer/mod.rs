@@ -407,6 +407,27 @@ impl<'a> Iterator for Lexer<'a> {
                     "goto",
                     Span::new(start, self.idx),
                 )),
+                "do" => Ok(Token::new(TokenKind::Do, "do", Span::new(start, self.idx))),
+                "while" => Ok(Token::new(
+                    TokenKind::While,
+                    "while",
+                    Span::new(start, self.idx),
+                )),
+                "for" => Ok(Token::new(
+                    TokenKind::For,
+                    "for",
+                    Span::new(start, self.idx),
+                )),
+                "break" => Ok(Token::new(
+                    TokenKind::Break,
+                    "break",
+                    Span::new(start, self.idx),
+                )),
+                "continue" => Ok(Token::new(
+                    TokenKind::Continue,
+                    "continue",
+                    Span::new(start, self.idx),
+                )),
                 id => Ok(Token::new(
                     TokenKind::Identifier,
                     id,
@@ -586,6 +607,20 @@ mod tests {
                 tok(TokenKind::Goto, "goto"),
                 tok(TokenKind::Identifier, "_label"),
                 tok(TokenKind::Semicolon, ";"),
+            ]
+        );
+    }
+
+    #[test]
+    fn loops() {
+        assert_eq!(
+            lex("do while for break continue").unwrap(),
+            vec![
+                tok(TokenKind::Do, "do"),
+                tok(TokenKind::While, "while"),
+                tok(TokenKind::For, "for"),
+                tok(TokenKind::Break, "break"),
+                tok(TokenKind::Continue, "continue"),
             ]
         );
     }

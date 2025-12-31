@@ -77,6 +77,11 @@ pub enum TokenKind {
     QMark,
     Colon,
     Goto,
+    Do,
+    While,
+    For,
+    Break,
+    Continue,
 }
 
 impl std::fmt::Display for TokenKind {
@@ -135,6 +140,11 @@ impl std::fmt::Display for TokenKind {
                 QMark => "'?'",
                 Colon => "':'",
                 Goto => "'goto'",
+                Do => "'do'",
+                While => "'while'",
+                For => "'for'",
+                Break => "'break'",
+                Continue => "'continue'",
             }
         )
     }

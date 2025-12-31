@@ -179,6 +179,127 @@ impl<'a> TackyEmitter<'a> {
                     }
                 }
             }
+            parser::StmtKind::Break(label) => {
+                let label = label
+                    .as_ref()
+                    .expect("label should be present")
+                    .name
+                    .clone();
+                self.instructions
+                    .push(Instruction::Jump(format!("{}.break", label)));
+            }
+            parser::StmtKind::Continue(label) => {
+                let label = label
+                    .as_ref()
+                    .expect("label should be present")
+                    .name
+                    .clone();
+                self.instructions
+                    .push(Instruction::Jump(format!("{}.continue", label)));
+            }
+            parser::StmtKind::While { cond, body, label } => {
+                let label = label
+                    .as_ref()
+                    .expect("label should be present")
+                    .name
+                    .clone();
+                let continue_label = format!("{}.continue", label);
+                let break_label = format!("{}.break", label);
+
+                self.instructions
+                    .push(Instruction::Label(continue_label.clone()));
+
+                let cond = self.visit_expr(cond)?;
+                let v1 = self.make_tmp();
+                self.instructions.extend(vec![
+                    Instruction::Copy(Box::new(cond), Box::new(v1.clone())),
+                    Instruction::JumpIfZero(Box::new(v1), break_label.clone()),
+                ]);
+
+                self.visit_stmt(body)?;
+
+                self.instructions.extend(vec![
+                    Instruction::Jump(continue_label),
+                    Instruction::Label(break_label),
+                ])
+            }
+            parser::StmtKind::DoWhile { body, cond, label } => {
+                let label = label
+                    .as_ref()
+                    .expect("label should be present")
+                    .name
+                    .clone();
+                let start_label = format!("{}.start", label);
+                let continue_label = format!("{}.continue", label);
+                let break_label = format!("{}.break", label);
+
+                self.instructions
+                    .push(Instruction::Label(start_label.clone()));
+
+                self.visit_stmt(body)?;
+
+                self.instructions
+                    .push(Instruction::Label(continue_label.clone()));
+
+                let cond = self.visit_expr(cond)?;
+                let v = self.make_tmp();
+                self.instructions.extend(vec![
+                    Instruction::Copy(Box::new(cond), Box::new(v.clone())),
+                    Instruction::JumpIfNotZero(Box::new(v), start_label.clone()),
+                ]);
+
+                self.instructions.push(Instruction::Label(break_label))
+            }
+            parser::StmtKind::For {
+                init,
+                cond,
+                post,
+                body,
+                label,
+            } => {
+                let label = label
+                    .as_ref()
+                    .expect("label should be present")
+                    .name
+                    .clone();
+                let start_label = format!("{}.start", label);
+                let continue_label = format!("{}.continue", label);
+                let break_label = format!("{}.break", label);
+
+                match init {
+                    parser::ForInit::Decl(decl) => self.visit_decl(decl)?,
+                    parser::ForInit::Expr(Some(expr)) => {
+                        let _ = self.visit_expr(expr)?;
+                    }
+                    parser::ForInit::Expr(None) => {}
+                }
+
+                self.instructions
+                    .push(Instruction::Label(start_label.clone()));
+
+                if let Some(cond) = cond {
+                    let cond = self.visit_expr(cond)?;
+                    let v = self.make_tmp();
+                    self.instructions.extend(vec![
+                        Instruction::Copy(Box::new(cond), Box::new(v.clone())),
+                        Instruction::JumpIfZero(Box::new(v), break_label.clone()),
+                    ]);
+                }
+
+                self.visit_stmt(body)?;
+
+                self.instructions
+                    .push(Instruction::Label(continue_label.clone()));
+
+                if let Some(post) = post {
+                    self.visit_expr(post)?;
+                }
+
+                self.instructions.extend(vec![
+                    Instruction::Jump(start_label),
+                    Instruction::Label(break_label),
+                ]);
+            }
         };
 
         Ok(())

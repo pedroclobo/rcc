@@ -177,9 +177,45 @@ impl VariableResolver {
                 }
                 self.env.pop();
             }
+            parser::StmtKind::Break(_) => {}
+            parser::StmtKind::Continue(_) => {}
+            parser::StmtKind::While { cond, body, .. } => {
+                self.resolve_expr(cond)?;
+                self.resolve_stmt(body)?;
+            }
+            parser::StmtKind::DoWhile { body, cond, .. } => {
+                self.resolve_stmt(body)?;
+                self.resolve_expr(cond)?;
+            }
+            parser::StmtKind::For {
+                init,
+                cond,
+                post,
+                body,
+                ..
+            } => {
+                self.env.push();
+                self.resolve_for_init(init)?;
+                if let Some(cond) = cond {
+                    self.resolve_expr(cond)?;
+                }
+                if let Some(post) = post {
+                    self.resolve_expr(post)?;
+                }
+                self.resolve_stmt(body)?;
+                self.env.pop();
+            }
         };
 
         Ok(())
+    }
+
+    fn resolve_for_init(&mut self, for_init: &mut parser::ForInit) -> Result<(), SemaError> {
+        match for_init {
+            parser::ForInit::Decl(decl) => self.resolve_decl(decl),
+            parser::ForInit::Expr(Some(expr)) => self.resolve_expr(expr),
+            parser::ForInit::Expr(None) => Ok(()),
+        }
     }
 
     fn resolve_expr(&mut self, expr: &mut parser::Expr) -> Result<(), SemaError> {
