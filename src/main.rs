@@ -124,7 +124,7 @@ fn run(
 
     let mut tacky_emitter = TackyEmitter::new();
     tacky_emitter
-        .visit_program(ast)
+        .visit_program(&ast)
         .map_err(|e| miette::Report::new(e).with_source_code(source.clone()))?;
     let prog = tacky_emitter
         .get_program()

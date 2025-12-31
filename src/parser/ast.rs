@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use miette::SourceSpan;
 
 use super::ParserError;
@@ -36,10 +38,51 @@ pub struct Program<'a> {
 #[derive(Debug)]
 pub struct FunctionDefinition<'a> {
     pub name: &'a str,
-    pub body: Vec<BlockItem>,
+    pub body: Block,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+pub struct Block {
+    pub items: VecDeque<BlockItem>,
+    pub span: Span,
+}
+
+impl PartialEq for Block {
+    fn eq(&self, other: &Self) -> bool {
+        self.items == other.items
+    }
+}
+
+impl Eq for Block {}
+
+impl IntoIterator for Block {
+    type Item = BlockItem;
+    type IntoIter = std::collections::vec_deque::IntoIter<BlockItem>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.items.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a Block {
+    type Item = &'a BlockItem;
+    type IntoIter = std::collections::vec_deque::Iter<'a, BlockItem>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.items.iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a mut Block {
+    type Item = &'a mut BlockItem;
+    type IntoIter = std::collections::vec_deque::IterMut<'a, BlockItem>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.items.iter_mut()
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum BlockItem {
     Decl(Decl),
     Stmt(Stmt),
@@ -57,7 +100,7 @@ impl PartialEq for BlockItem {
 
 impl Eq for BlockItem {}
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Decl {
     pub kind: DeclKind,
     pub span: Span,
@@ -71,7 +114,7 @@ impl PartialEq for Decl {
 
 impl Eq for Decl {}
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct DeclKind {
     pub name: String,
     pub initializer: Option<Expr>,
@@ -105,6 +148,7 @@ pub enum StmtKind {
         stmt: Box<Stmt>,
     },
     Goto(Label),
+    Block(Block),
 }
 
 #[derive(Debug, Clone)]

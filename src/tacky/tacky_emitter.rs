@@ -40,10 +40,10 @@ impl<'a> TackyEmitter<'a> {
         tmp
     }
 
-    pub fn visit_program(&mut self, program: parser::Program<'a>) -> Result<(), TackyError> {
+    pub fn visit_program(&mut self, program: &parser::Program<'a>) -> Result<(), TackyError> {
         let mut functions = Vec::new();
 
-        for function in program.functions {
+        for function in &program.functions {
             self.visit_function_definition(function)?;
             if let Some(function) = self.function.take() {
                 functions.push(function);
@@ -56,7 +56,7 @@ impl<'a> TackyEmitter<'a> {
 
     fn visit_function_definition(
         &mut self,
-        function_definition: parser::FunctionDefinition<'a>,
+        function_definition: &parser::FunctionDefinition<'a>,
     ) -> Result<(), TackyError> {
         let mut has_return = false;
         for item in &function_definition.body {
@@ -69,7 +69,7 @@ impl<'a> TackyEmitter<'a> {
             }
         }
 
-        for item in function_definition.body {
+        for item in &function_definition.body {
             match item {
                 parser::BlockItem::Decl(decl) => self.visit_decl(decl)?,
                 parser::BlockItem::Stmt(stmt) => self.visit_stmt(stmt)?,
@@ -89,21 +89,21 @@ impl<'a> TackyEmitter<'a> {
         Ok(())
     }
 
-    fn visit_decl(&mut self, decl: parser::Decl) -> Result<(), TackyError> {
+    fn visit_decl(&mut self, decl: &parser::Decl) -> Result<(), TackyError> {
         let parser::Decl { kind, .. } = decl;
 
-        if let Some(initializer) = kind.initializer {
+        if let Some(initializer) = &kind.initializer {
             let expr = self.visit_expr(initializer)?;
             self.instructions.push(Instruction::Copy(
                 Box::new(expr),
-                Box::new(Value::Var(kind.name)),
+                Box::new(Value::Var(kind.name.clone())),
             ));
         }
 
         Ok(())
     }
 
-    fn visit_stmt(&mut self, stmt: parser::Stmt) -> Result<(), TackyError> {
+    fn visit_stmt(&mut self, stmt: &parser::Stmt) -> Result<(), TackyError> {
         let parser::Stmt { kind, .. } = stmt;
 
         match kind {
@@ -131,7 +131,7 @@ impl<'a> TackyEmitter<'a> {
                     Instruction::JumpIfZero(Box::new(v1), end_label.clone()),
                 ]);
 
-                self.visit_stmt(*then)?;
+                self.visit_stmt(then)?;
 
                 self.instructions.push(Instruction::Label(end_label));
             }
@@ -151,14 +151,14 @@ impl<'a> TackyEmitter<'a> {
                     Instruction::JumpIfZero(Box::new(v1), else_label.clone()),
                 ]);
 
-                self.visit_stmt(*then)?;
+                self.visit_stmt(then)?;
 
                 self.instructions.extend(vec![
                     Instruction::Jump(end_label.clone()),
                     Instruction::Label(else_label),
                 ]);
 
-                self.visit_stmt(*r#else)?;
+                self.visit_stmt(r#else)?;
 
                 self.instructions
                     .extend(vec![Instruction::Label(end_label)]);
@@ -166,20 +166,28 @@ impl<'a> TackyEmitter<'a> {
             parser::StmtKind::Labeled { label, stmt } => {
                 self.instructions
                     .push(Instruction::Label(label.name.clone()));
-                self.visit_stmt(*stmt)?;
+                self.visit_stmt(stmt)?;
             }
             parser::StmtKind::Goto(label) => self
                 .instructions
                 .push(Instruction::Jump(label.name.clone())),
+            parser::StmtKind::Block(block) => {
+                for item in &block.items {
+                    match item {
+                        parser::BlockItem::Decl(decl) => self.visit_decl(decl)?,
+                        parser::BlockItem::Stmt(stmt) => self.visit_stmt(stmt)?,
+                    }
+                }
+            }
         };
 
         Ok(())
     }
 
-    fn visit_expr(&mut self, expr: parser::Expr) -> Result<Value, TackyError> {
+    fn visit_expr(&mut self, expr: &parser::Expr) -> Result<Value, TackyError> {
         let parser::Expr { kind, .. } = expr;
         match kind {
-            parser::ExprKind::Constant(n) => Ok(Value::Constant(n)),
+            parser::ExprKind::Constant(n) => Ok(Value::Constant(*n)),
             parser::ExprKind::Unary(
                 op @ (parser::UnaryOperator::Neg
                 | parser::UnaryOperator::Not
@@ -187,7 +195,7 @@ impl<'a> TackyEmitter<'a> {
                 expr,
             ) => {
                 let dst = self.make_tmp();
-                let expr = self.visit_expr(*expr)?;
+                let expr = self.visit_expr(expr)?;
 
                 self.instructions.push(Instruction::Unary(
                     op.try_into()?,
@@ -202,7 +210,7 @@ impl<'a> TackyEmitter<'a> {
                 expr,
             ) => {
                 let dst = self.make_tmp();
-                let expr = self.visit_expr(*expr)?;
+                let expr = self.visit_expr(expr)?;
 
                 self.instructions.push(Instruction::Binary(
                     match op {
@@ -225,7 +233,7 @@ impl<'a> TackyEmitter<'a> {
             ) => {
                 let dst_1 = self.make_tmp();
                 let dst_2 = self.make_tmp();
-                let expr = self.visit_expr(*expr)?;
+                let expr = self.visit_expr(expr)?;
 
                 self.instructions.push(Instruction::Copy(
                     Box::new(expr.clone()),
@@ -254,7 +262,7 @@ impl<'a> TackyEmitter<'a> {
                 let other_label = self.make_label();
                 let end_label = self.make_label();
 
-                let lhs = self.visit_expr(*lhs)?;
+                let lhs = self.visit_expr(lhs)?;
                 let v1 = self.make_tmp();
 
                 self.instructions.extend(vec![
@@ -266,7 +274,7 @@ impl<'a> TackyEmitter<'a> {
                     },
                 ]);
 
-                let rhs = self.visit_expr(*rhs)?;
+                let rhs = self.visit_expr(rhs)?;
                 let v2 = self.make_tmp();
                 let dst = self.make_tmp();
 
@@ -301,8 +309,8 @@ impl<'a> TackyEmitter<'a> {
                 Ok(dst)
             }
             parser::ExprKind::Binary(op, lhs, rhs) => {
-                let lhs = self.visit_expr(*lhs)?;
-                let rhs = self.visit_expr(*rhs)?;
+                let lhs = self.visit_expr(lhs)?;
+                let rhs = self.visit_expr(rhs)?;
                 let dst = self.make_tmp();
 
                 self.instructions.push(Instruction::Binary(
@@ -314,10 +322,10 @@ impl<'a> TackyEmitter<'a> {
 
                 Ok(dst)
             }
-            parser::ExprKind::Var(name) => Ok(Value::Var(name)),
+            parser::ExprKind::Var(name) => Ok(Value::Var(name.clone())),
             parser::ExprKind::Assignment(lhs, rhs) => {
-                let lhs = self.visit_expr(*lhs)?;
-                let rhs = self.visit_expr(*rhs)?;
+                let lhs = self.visit_expr(lhs)?;
+                let rhs = self.visit_expr(rhs)?;
 
                 self.instructions
                     .push(Instruction::Copy(Box::new(rhs), Box::new(lhs.clone())));
@@ -329,14 +337,14 @@ impl<'a> TackyEmitter<'a> {
                 let else_label = self.make_label();
                 let end_label = self.make_label();
 
-                let cond = self.visit_expr(*cond)?;
+                let cond = self.visit_expr(cond)?;
                 let c = self.make_tmp();
                 self.instructions.extend(vec![
                     Instruction::Copy(Box::new(cond), Box::new(c.clone())),
                     Instruction::JumpIfZero(Box::new(c), else_label.clone()),
                 ]);
 
-                let then = self.visit_expr(*then)?;
+                let then = self.visit_expr(then)?;
                 let v1 = self.make_tmp();
                 self.instructions.extend(vec![
                     Instruction::Copy(Box::new(then), Box::new(v1.clone())),
@@ -345,7 +353,7 @@ impl<'a> TackyEmitter<'a> {
                 ]);
 
                 self.instructions.push(Instruction::Label(else_label));
-                let r#else = self.visit_expr(*r#else)?;
+                let r#else = self.visit_expr(r#else)?;
                 let v2 = self.make_tmp();
                 self.instructions.extend(vec![
                     Instruction::Copy(Box::new(r#else), Box::new(v2.clone())),

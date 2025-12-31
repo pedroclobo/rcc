@@ -9,10 +9,10 @@ pub use error::ParserError;
 
 use crate::{
     lexer::{Lexer, Token, TokenKind},
-    parser::ast::Label,
+    parser::ast::{Block, Label},
 };
 
-use std::iter::Peekable;
+use std::{collections::VecDeque, iter::Peekable};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Precedence {
@@ -191,17 +191,29 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::Void)?;
         self.expect(TokenKind::RParen)?;
 
-        self.expect(TokenKind::LBrace)?;
-        let mut body = Vec::new();
+        let body = self.parse_block()?;
+
+        Ok(FunctionDefinition { name, body })
+    }
+
+    // <block> ::= { <body_item> }
+    fn parse_block(&mut self) -> Result<Block, ParserError> {
+        let start = self.expect(TokenKind::LBrace)?.span.start;
+
+        let mut body = VecDeque::new();
         while let Ok(tok) = self.peek() {
             match tok.kind {
                 TokenKind::RBrace => break,
-                _ => body.push(self.parse_body_item()?),
+                _ => body.push_back(self.parse_body_item()?),
             }
         }
-        self.expect(TokenKind::RBrace)?;
 
-        Ok(FunctionDefinition { name, body })
+        let end = self.expect(TokenKind::RBrace)?.span.end;
+
+        Ok(Block {
+            items: body,
+            span: Span::new(start, end),
+        })
     }
 
     // <body_item> ::= <stmt> | <decl>
@@ -246,7 +258,14 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // <stmt> ::= "return" <exp> ";" | <exp> ";" | "if" "(" <exp> ")" <stmt> [ "else" <stmt> ] ";" | <label>: | "goto" <label> ";" | ";"
+    // <stmt> ::= "return" <exp> ";" |
+    //            <exp> ";" |
+    //            "if" "(" <exp> ")" <stmt> [ "else" <stmt> ] ";" |
+    //            <block> |
+    //            <label>:
+    //            <block> |
+    //            "goto" <label> ";" |
+    //            ";"
     fn parse_stmt(&mut self) -> Result<Stmt, ParserError> {
         let tok = self.peek()?;
 
@@ -259,6 +278,15 @@ impl<'a> Parser<'a> {
                 Ok(Stmt {
                     kind: StmtKind::Return(expr),
                     span: Span::new(start, end),
+                })
+            }
+            TokenKind::LBrace => {
+                let body = self.parse_block()?;
+                let span = body.span;
+
+                Ok(Stmt {
+                    kind: StmtKind::Block(body),
+                    span,
                 })
             }
             TokenKind::Semicolon => {
@@ -671,6 +699,12 @@ mod tests {
         };
     }
 
+    macro_rules! block_stmt {
+        ($($item:expr),* $(,)?) => {
+            stmt!(StmtKind::Block(block![$(BlockItem::Stmt($item)),*]))
+        };
+    }
+
     macro_rules! decl {
         ($name:expr) => {
             Decl {
@@ -692,6 +726,15 @@ mod tests {
         };
     }
 
+    macro_rules! block {
+        ($($item:expr),* $(,)?) => {
+            Block {
+                items: VecDeque::from(vec![$($item),*]),
+                span: dummy_span!(),
+            }
+        };
+    }
+
     #[test]
     fn return_0() {
         let mut parser = Parser::new("int main(void) { return 0; }");
@@ -702,7 +745,7 @@ mod tests {
         assert_eq!(ast.functions[0].name, "main");
         assert_eq!(
             ast.functions[0].body,
-            vec![BlockItem::Stmt(return_stmt!(constant!(0)))]
+            block![BlockItem::Stmt(return_stmt!(constant!(0)))]
         );
     }
 
@@ -716,7 +759,7 @@ mod tests {
         assert_eq!(ast.functions[0].name, "main");
         assert_eq!(
             ast.functions[0].body,
-            vec![BlockItem::Stmt(return_stmt!(constant!(2)))]
+            block![BlockItem::Stmt(return_stmt!(constant!(2)))]
         );
     }
 
@@ -730,7 +773,7 @@ mod tests {
         assert_eq!(ast.functions[0].name, "main");
         assert_eq!(
             ast.functions[0].body,
-            vec![BlockItem::Stmt(return_stmt!(unary!(
+            block![BlockItem::Stmt(return_stmt!(unary!(
                 UnaryOperator::Neg,
                 constant!(2)
             )))]
@@ -747,7 +790,7 @@ mod tests {
         assert_eq!(ast.functions[0].name, "main");
         assert_eq!(
             ast.functions[0].body,
-            vec![BlockItem::Stmt(return_stmt!(unary!(
+            block![BlockItem::Stmt(return_stmt!(unary!(
                 UnaryOperator::BNot,
                 constant!(2)
             )))]
@@ -764,7 +807,7 @@ mod tests {
         assert_eq!(ast.functions[0].name, "main");
         assert_eq!(
             ast.functions[0].body,
-            vec![BlockItem::Stmt(return_stmt!(unary!(
+            block![BlockItem::Stmt(return_stmt!(unary!(
                 UnaryOperator::BNot,
                 unary!(UnaryOperator::Neg, constant!(2))
             )))]
@@ -1068,9 +1111,21 @@ mod tests {
     #[test]
     fn goto_stmt() {
         let mut parser = Parser::new("goto label;");
-        let expr = parser.parse_stmt().unwrap();
+        let stmt = parser.parse_stmt().unwrap();
         assert!(parser.lexer.next().is_none());
 
-        assert_eq!(expr, goto_stmt!("label"))
+        assert_eq!(stmt, goto_stmt!("label"))
+    }
+
+    #[test]
+    fn block() {
+        let mut parser = Parser::new("{ return 1; return 2; }");
+        let stmt = parser.parse_stmt().unwrap();
+        assert!(parser.lexer.next().is_none());
+
+        assert_eq!(
+            stmt,
+            block_stmt!(return_stmt!(constant!(1)), return_stmt!(constant!(2)))
+        );
     }
 }

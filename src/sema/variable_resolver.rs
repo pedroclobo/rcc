@@ -5,15 +5,73 @@ use super::SemaError;
 use std::collections::{HashMap, HashSet};
 
 pub struct VariableResolver {
-    vars: HashMap<String, String>,
+    env: Env,
     labels: HashSet<String>,
     counter: u32,
+}
+
+#[derive(Debug)]
+struct Scope {
+    vars: HashMap<String, String>,
+}
+
+impl Scope {
+    fn new() -> Self {
+        Scope {
+            vars: HashMap::new(),
+        }
+    }
+
+    fn add(&mut self, name: String, value: String) {
+        self.vars.insert(name, value);
+    }
+
+    fn contains(&self, name: &str) -> bool {
+        self.vars.contains_key(name)
+    }
+
+    fn get(&self, name: &str) -> Option<&String> {
+        self.vars.get(name)
+    }
+}
+
+#[derive(Debug)]
+struct Env {
+    scopes: Vec<Scope>,
+}
+
+impl Env {
+    fn new() -> Self {
+        Env {
+            scopes: vec![Scope::new()],
+        }
+    }
+
+    fn push(&mut self) {
+        self.scopes.push(Scope::new());
+    }
+
+    fn pop(&mut self) {
+        self.scopes.pop();
+    }
+
+    fn add(&mut self, name: String, value: String) {
+        self.scopes.last_mut().unwrap().add(name, value);
+    }
+
+    fn contains(&self, name: &str) -> bool {
+        self.scopes.last().unwrap().contains(name)
+    }
+
+    fn get(&self, name: &str) -> Option<&String> {
+        self.scopes.iter().rev().find_map(|scope| scope.get(name))
+    }
 }
 
 impl VariableResolver {
     pub fn new() -> Self {
         VariableResolver {
-            vars: HashMap::new(),
+            env: Env::new(),
             labels: HashSet::new(),
             counter: 0,
         }
@@ -62,7 +120,7 @@ impl VariableResolver {
         let parser::Decl { kind, .. } = decl;
 
         let name = kind.name.clone();
-        if self.vars.contains_key(&name) {
+        if self.env.contains(&name) {
             return Err(SemaError::DuplicateVariableDeclaration {
                 var: name.to_string(),
                 span: decl.span.into(),
@@ -70,7 +128,7 @@ impl VariableResolver {
         }
 
         let new_name = self.make_tmp(&name);
-        self.vars.insert(name, new_name.clone());
+        self.env.add(name, new_name.clone());
 
         kind.name = new_name;
         if let Some(initializer) = &mut kind.initializer {
@@ -105,6 +163,20 @@ impl VariableResolver {
                 self.resolve_stmt(stmt)?;
             }
             parser::StmtKind::Goto(_) => {}
+            parser::StmtKind::Block(block) => {
+                self.env.push();
+                for item in block.items.iter_mut() {
+                    match item {
+                        parser::BlockItem::Decl(decl) => {
+                            self.resolve_decl(decl)?;
+                        }
+                        parser::BlockItem::Stmt(stmt) => {
+                            self.resolve_stmt(stmt)?;
+                        }
+                    }
+                }
+                self.env.pop();
+            }
         };
 
         Ok(())
@@ -116,7 +188,7 @@ impl VariableResolver {
         match kind {
             parser::ExprKind::Constant(_) => {}
             parser::ExprKind::Var(name) => {
-                if let Some(var) = self.vars.get(name) {
+                if let Some(var) = self.env.get(name) {
                     *kind = parser::ExprKind::Var(var.clone());
                 } else {
                     return Err(SemaError::UndeclaredVariable {

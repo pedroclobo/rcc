@@ -80,15 +80,15 @@ impl std::fmt::Display for UnaryOperator {
     }
 }
 
-impl TryFrom<parser::UnaryOperator> for UnaryOperator {
+impl TryFrom<&parser::UnaryOperator> for UnaryOperator {
     type Error = TackyError;
 
-    fn try_from(op: parser::UnaryOperator) -> Result<Self, Self::Error> {
+    fn try_from(op: &parser::UnaryOperator) -> Result<Self, Self::Error> {
         match op {
             parser::UnaryOperator::BNot => Ok(UnaryOperator::BNot),
             parser::UnaryOperator::Neg => Ok(UnaryOperator::Neg),
             parser::UnaryOperator::Not => Ok(UnaryOperator::Not),
-            _ => Err(TackyError::UnsupportedUnaryOperator { op }),
+            _ => Err(TackyError::UnsupportedUnaryOperator { op: *op }),
         }
     }
 }
@@ -136,10 +136,10 @@ impl std::fmt::Display for BinaryOperator {
     }
 }
 
-impl TryFrom<parser::BinaryOperator> for BinaryOperator {
+impl TryFrom<&parser::BinaryOperator> for BinaryOperator {
     type Error = TackyError;
 
-    fn try_from(op: parser::BinaryOperator) -> Result<Self, Self::Error> {
+    fn try_from(op: &parser::BinaryOperator) -> Result<Self, Self::Error> {
         match op {
             parser::BinaryOperator::Add => Ok(BinaryOperator::Add),
             parser::BinaryOperator::Sub => Ok(BinaryOperator::Sub),
@@ -157,7 +157,7 @@ impl TryFrom<parser::BinaryOperator> for BinaryOperator {
             parser::BinaryOperator::Gt => Ok(BinaryOperator::Gt),
             parser::BinaryOperator::Le => Ok(BinaryOperator::Le),
             parser::BinaryOperator::Ge => Ok(BinaryOperator::Ge),
-            _ => Err(TackyError::UnsupportedBinaryOperator { op }),
+            _ => Err(TackyError::UnsupportedBinaryOperator { op: *op }),
         }
     }
 }
