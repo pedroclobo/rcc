@@ -270,6 +270,9 @@ impl<'a> Parser<'a> {
     //            "while" "(" <exp> ")" <stmt> |
     //            "do" <statement> "while" "(" <exp> ")" ";" |
     //            "for" "(" <for-init> [ <exp> ] ";" [ <exp> ] ")" <stmt> |
+    //            "switch" "(" <exp> ")" <stmt> |
+    //            "case" <exp> ":" <stmt> |
+    //            "default" ":" <stmt> |
     //            ";"
     fn parse_stmt(&mut self) -> Result<Stmt, ParserError> {
         let tok = self.peek()?;
@@ -282,6 +285,53 @@ impl<'a> Parser<'a> {
                 self.expect(TokenKind::Semicolon)?;
                 Ok(Stmt {
                     kind: StmtKind::Return(expr),
+                    span: Span::new(start, end),
+                })
+            }
+            //            "switch" "(" <exp> ")" <stmt> |
+            //            "case" <exp> ":" <stmt> |
+            //            "default" ":" <stmt> |
+            TokenKind::Switch => {
+                let start = self.expect(TokenKind::Switch)?.span.start;
+                self.expect(TokenKind::LParen)?;
+                let expr = self.parse_expr()?;
+                self.expect(TokenKind::RParen)?;
+                let body = self.parse_stmt()?;
+                let end = body.span.end;
+
+                Ok(Stmt {
+                    kind: StmtKind::Switch {
+                        expr,
+                        body: Box::new(body),
+                    },
+                    span: Span::new(start, end),
+                })
+            }
+            TokenKind::Case => {
+                let start = self.expect(TokenKind::Case)?.span.start;
+                let expr = self.parse_expr()?;
+                self.expect(TokenKind::Colon)?;
+                let stmt = self.parse_stmt()?;
+                let end = stmt.span.end;
+
+                Ok(Stmt {
+                    kind: StmtKind::Case {
+                        expr,
+                        body: Box::new(stmt),
+                    },
+                    span: Span::new(start, end),
+                })
+            }
+            TokenKind::Default => {
+                let start = self.expect(TokenKind::Default)?.span.start;
+                self.expect(TokenKind::Colon)?;
+                let body = self.parse_stmt()?;
+                let end = body.span.end;
+
+                Ok(Stmt {
+                    kind: StmtKind::Default {
+                        body: Box::new(body),
+                    },
                     span: Span::new(start, end),
                 })
             }
@@ -305,7 +355,7 @@ impl<'a> Parser<'a> {
                 let span = self.expect(TokenKind::Break)?.span;
                 self.expect(TokenKind::Semicolon)?;
                 Ok(Stmt {
-                    kind: StmtKind::Break(None),
+                    kind: StmtKind::Break,
                     span,
                 })
             }
@@ -313,7 +363,7 @@ impl<'a> Parser<'a> {
                 let span = self.expect(TokenKind::Continue)?.span;
                 self.expect(TokenKind::Semicolon)?;
                 Ok(Stmt {
-                    kind: StmtKind::Continue(None),
+                    kind: StmtKind::Continue,
                     span,
                 })
             }
@@ -331,7 +381,6 @@ impl<'a> Parser<'a> {
                     kind: StmtKind::While {
                         cond,
                         body: Box::new(body),
-                        label: None,
                     },
                     span: Span::new(start, end),
                 })
@@ -349,7 +398,6 @@ impl<'a> Parser<'a> {
                     kind: StmtKind::DoWhile {
                         body: Box::new(body),
                         cond,
-                        label: None,
                     },
                     span: Span::new(start, end),
                 })
@@ -387,7 +435,6 @@ impl<'a> Parser<'a> {
                         cond,
                         post,
                         body: Box::new(body),
-                        label: None,
                     },
                     span: Span::new(start, end),
                 })
@@ -822,7 +869,6 @@ mod tests {
             stmt!(StmtKind::While {
                 cond: $cond,
                 body: Box::new($body),
-                label: None,
             })
         };
     }
@@ -832,7 +878,6 @@ mod tests {
             stmt!(StmtKind::DoWhile {
                 body: Box::new($body),
                 cond: $cond,
-                label: None,
             })
         };
     }
@@ -844,20 +889,45 @@ mod tests {
                 cond: $cond,
                 post: $post,
                 body: Box::new($body),
-                label: None,
             })
         };
     }
 
     macro_rules! break_stmt {
         () => {
-            stmt!(StmtKind::Break(None))
+            stmt!(StmtKind::Break)
         };
     }
 
     macro_rules! continue_stmt {
         () => {
-            stmt!(StmtKind::Continue(None))
+            stmt!(StmtKind::Continue)
+        };
+    }
+
+    macro_rules! switch_stmt {
+        ($expr:expr, $body:expr) => {
+            stmt!(StmtKind::Switch {
+                expr: $expr,
+                body: Box::new($body),
+            })
+        };
+    }
+
+    macro_rules! case_stmt {
+        ($expr:expr, $body:expr) => {
+            stmt!(StmtKind::Case {
+                expr: $expr,
+                body: Box::new($body),
+            })
+        };
+    }
+
+    macro_rules! default_stmt {
+        ($body:expr) => {
+            stmt!(StmtKind::Default {
+                body: Box::new($body),
+            })
         };
     }
 
@@ -1386,6 +1456,26 @@ mod tests {
                         break_stmt!()
                     ),
                     continue_stmt!()
+                )
+            )
+        );
+    }
+
+    #[test]
+    fn switch() {
+        let mut parser =
+            Parser::new("switch (a) { case 1: return 0; case 2: return 3; default: return 1; }");
+        let stmt = parser.parse_stmt().unwrap();
+        assert!(parser.lexer.next().is_none());
+
+        assert_eq!(
+            stmt,
+            switch_stmt!(
+                var!("a"),
+                block_stmt!(
+                    case_stmt!(constant!(1), return_stmt!(constant!(0))),
+                    case_stmt!(constant!(2), return_stmt!(constant!(3))),
+                    default_stmt!(return_stmt!(constant!(1)))
                 )
             )
         );

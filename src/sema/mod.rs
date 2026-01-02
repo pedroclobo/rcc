@@ -1,9 +1,13 @@
+mod context_checker;
 mod error;
-mod loop_labeler;
+mod instruction_collector;
+mod label_resolver;
 mod variable_resolver;
 
+use context_checker::ContextChecker;
 pub use error::SemaError;
-use loop_labeler::LoopLabeler;
+pub use instruction_collector::InstructionCollector;
+use label_resolver::LabelResolver;
 use variable_resolver::VariableResolver;
 
 use crate::parser;
@@ -17,10 +21,12 @@ impl Sema {
 
     pub fn run(&mut self, program: &mut parser::Program) -> Result<(), SemaError> {
         let mut var_resolver = VariableResolver::new();
-        let mut loop_labeler = LoopLabeler::new();
+        let mut label_resolver = LabelResolver::new();
+        let mut context_checker = ContextChecker::new();
 
         var_resolver.run(program)?;
-        loop_labeler.run(program)?;
+        label_resolver.run(program)?;
+        context_checker.run(program)?;
 
         Ok(())
     }

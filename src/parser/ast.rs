@@ -149,24 +149,32 @@ pub enum StmtKind {
     },
     Goto(Label),
     Block(Block),
-    Break(Option<Label>),
-    Continue(Option<Label>),
+    Break,
+    Continue,
     While {
         cond: Expr,
         body: Box<Stmt>,
-        label: Option<Label>,
     },
     DoWhile {
         body: Box<Stmt>,
         cond: Expr,
-        label: Option<Label>,
     },
     For {
         init: ForInit,
         cond: Option<Expr>,
         post: Option<Expr>,
         body: Box<Stmt>,
-        label: Option<Label>,
+    },
+    Switch {
+        expr: Expr,
+        body: Box<Stmt>,
+    },
+    Case {
+        expr: Expr,
+        body: Box<Stmt>,
+    },
+    Default {
+        body: Box<Stmt>,
     },
 }
 

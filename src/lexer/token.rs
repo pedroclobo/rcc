@@ -82,6 +82,9 @@ pub enum TokenKind {
     For,
     Break,
     Continue,
+    Switch,
+    Case,
+    Default,
 }
 
 impl std::fmt::Display for TokenKind {
@@ -145,6 +148,9 @@ impl std::fmt::Display for TokenKind {
                 For => "'for'",
                 Break => "'break'",
                 Continue => "'continue'",
+                Switch => "'switch'",
+                Case => "'case'",
+                Default => "'default'",
             }
         )
     }

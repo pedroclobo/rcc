@@ -428,6 +428,21 @@ impl<'a> Iterator for Lexer<'a> {
                     "continue",
                     Span::new(start, self.idx),
                 )),
+                "switch" => Ok(Token::new(
+                    TokenKind::Switch,
+                    "switch",
+                    Span::new(start, self.idx),
+                )),
+                "case" => Ok(Token::new(
+                    TokenKind::Case,
+                    "case",
+                    Span::new(start, self.idx),
+                )),
+                "default" => Ok(Token::new(
+                    TokenKind::Default,
+                    "default",
+                    Span::new(start, self.idx),
+                )),
                 id => Ok(Token::new(
                     TokenKind::Identifier,
                     id,
@@ -621,6 +636,18 @@ mod tests {
                 tok(TokenKind::For, "for"),
                 tok(TokenKind::Break, "break"),
                 tok(TokenKind::Continue, "continue"),
+            ]
+        );
+    }
+
+    #[test]
+    fn switch() {
+        assert_eq!(
+            lex("switch case default").unwrap(),
+            vec![
+                tok(TokenKind::Switch, "switch"),
+                tok(TokenKind::Case, "case"),
+                tok(TokenKind::Default, "default"),
             ]
         );
     }

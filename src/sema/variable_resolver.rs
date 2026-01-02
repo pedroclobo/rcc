@@ -78,12 +78,6 @@ impl VariableResolver {
     }
 
     pub fn run(&mut self, program: &mut parser::Program<'_>) -> Result<(), SemaError> {
-        self.resolve_vars(program)?;
-        self.resolve_labels(program)?;
-        Ok(())
-    }
-
-    fn resolve_vars(&mut self, program: &mut parser::Program<'_>) -> Result<(), SemaError> {
         for function in &mut program.functions {
             for instruction in &mut function.body {
                 match instruction {
@@ -93,23 +87,6 @@ impl VariableResolver {
                     parser::BlockItem::Stmt(stmt) => {
                         self.resolve_stmt(stmt)?;
                     }
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn resolve_labels(&mut self, program: &mut parser::Program<'_>) -> Result<(), SemaError> {
-        for function in &mut program.functions {
-            for instruction in &mut function.body {
-                if let parser::BlockItem::Stmt(stmt) = instruction
-                    && let parser::StmtKind::Goto(label) = &stmt.kind
-                    && !self.labels.contains(&label.name)
-                {
-                    return Err(SemaError::UndeclaredLabel {
-                        label: label.name.to_string(),
-                        span: stmt.span.into(),
-                    });
                 }
             }
         }
@@ -177,13 +154,10 @@ impl VariableResolver {
                 }
                 self.env.pop();
             }
-            parser::StmtKind::Break(_) => {}
-            parser::StmtKind::Continue(_) => {}
-            parser::StmtKind::While { cond, body, .. } => {
-                self.resolve_expr(cond)?;
-                self.resolve_stmt(body)?;
-            }
-            parser::StmtKind::DoWhile { body, cond, .. } => {
+            parser::StmtKind::Break => {}
+            parser::StmtKind::Continue => {}
+            parser::StmtKind::While { cond, body, .. }
+            | parser::StmtKind::DoWhile { body, cond, .. } => {
                 self.resolve_stmt(body)?;
                 self.resolve_expr(cond)?;
             }
@@ -204,6 +178,13 @@ impl VariableResolver {
                 }
                 self.resolve_stmt(body)?;
                 self.env.pop();
+            }
+            parser::StmtKind::Switch { expr, body } | parser::StmtKind::Case { expr, body } => {
+                self.resolve_expr(expr)?;
+                self.resolve_stmt(body)?;
+            }
+            parser::StmtKind::Default { body } => {
+                self.resolve_stmt(body)?;
             }
         };
 

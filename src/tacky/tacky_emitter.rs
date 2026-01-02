@@ -1,11 +1,29 @@
-use super::{FunctionDefinition, Instruction, Program, TackyError, Value};
-use crate::{parser, tacky::BinaryOperator};
+use std::collections::VecDeque;
+
+use super::{BinaryOperator, FunctionDefinition, Instruction, Program, TackyError, Value};
+use crate::{parser, sema};
+
+#[derive(Debug, Clone)]
+struct CaseInfo<'a> {
+    expr: &'a parser::Expr,
+    label: String,
+}
+
+#[derive(Debug, Clone)]
+struct DefaultInfo {
+    label: String,
+}
 
 pub struct TackyEmitter<'a> {
     program: Option<Program<'a>>,
     function: Option<FunctionDefinition<'a>>,
     instructions: Vec<Instruction>,
     counter: usize,
+
+    break_labels: Vec<String>,
+    continue_labels: Vec<String>,
+    case_info: Vec<VecDeque<CaseInfo<'a>>>,
+    default_info: Vec<DefaultInfo>,
 }
 
 impl Default for TackyEmitter<'_> {
@@ -21,6 +39,11 @@ impl<'a> TackyEmitter<'a> {
             function: None,
             instructions: Vec::new(),
             counter: 0,
+
+            break_labels: Vec::new(),
+            continue_labels: Vec::new(),
+            case_info: Vec::new(),
+            default_info: Vec::new(),
         }
     }
 
@@ -40,7 +63,7 @@ impl<'a> TackyEmitter<'a> {
         tmp
     }
 
-    pub fn visit_program(&mut self, program: &parser::Program<'a>) -> Result<(), TackyError> {
+    pub fn visit_program(&mut self, program: &'a parser::Program<'a>) -> Result<(), TackyError> {
         let mut functions = Vec::new();
 
         for function in &program.functions {
@@ -56,7 +79,7 @@ impl<'a> TackyEmitter<'a> {
 
     fn visit_function_definition(
         &mut self,
-        function_definition: &parser::FunctionDefinition<'a>,
+        function_definition: &'a parser::FunctionDefinition<'a>,
     ) -> Result<(), TackyError> {
         let mut has_return = false;
         for item in &function_definition.body {
@@ -103,7 +126,7 @@ impl<'a> TackyEmitter<'a> {
         Ok(())
     }
 
-    fn visit_stmt(&mut self, stmt: &parser::Stmt) -> Result<(), TackyError> {
+    fn visit_stmt(&mut self, stmt: &'a parser::Stmt) -> Result<(), TackyError> {
         let parser::Stmt { kind, .. } = stmt;
 
         match kind {
@@ -179,32 +202,28 @@ impl<'a> TackyEmitter<'a> {
                     }
                 }
             }
-            parser::StmtKind::Break(label) => {
-                let label = label
-                    .as_ref()
-                    .expect("label should be present")
-                    .name
+            parser::StmtKind::Break => {
+                let label = self
+                    .break_labels
+                    .last()
+                    .expect("break outside of loop/switch")
                     .clone();
-                self.instructions
-                    .push(Instruction::Jump(format!("{}.break", label)));
+                self.instructions.push(Instruction::Jump(label));
             }
-            parser::StmtKind::Continue(label) => {
-                let label = label
-                    .as_ref()
-                    .expect("label should be present")
-                    .name
+            parser::StmtKind::Continue => {
+                let label = self
+                    .continue_labels
+                    .last()
+                    .expect("continue outside of loop")
                     .clone();
-                self.instructions
-                    .push(Instruction::Jump(format!("{}.continue", label)));
+                self.instructions.push(Instruction::Jump(label));
             }
-            parser::StmtKind::While { cond, body, label } => {
-                let label = label
-                    .as_ref()
-                    .expect("label should be present")
-                    .name
-                    .clone();
+            parser::StmtKind::While { cond, body } => {
+                let label = self.make_label();
                 let continue_label = format!("{}.continue", label);
                 let break_label = format!("{}.break", label);
+                self.break_labels.push(break_label.clone());
+                self.continue_labels.push(continue_label.clone());
 
                 self.instructions
                     .push(Instruction::Label(continue_label.clone()));
@@ -221,17 +240,18 @@ impl<'a> TackyEmitter<'a> {
                 self.instructions.extend(vec![
                     Instruction::Jump(continue_label),
                     Instruction::Label(break_label),
-                ])
+                ]);
+
+                self.break_labels.pop();
+                self.continue_labels.pop();
             }
-            parser::StmtKind::DoWhile { body, cond, label } => {
-                let label = label
-                    .as_ref()
-                    .expect("label should be present")
-                    .name
-                    .clone();
+            parser::StmtKind::DoWhile { body, cond } => {
+                let label = self.make_label();
                 let start_label = format!("{}.start", label);
                 let continue_label = format!("{}.continue", label);
+                self.continue_labels.push(continue_label.clone());
                 let break_label = format!("{}.break", label);
+                self.break_labels.push(break_label.clone());
 
                 self.instructions
                     .push(Instruction::Label(start_label.clone()));
@@ -248,23 +268,23 @@ impl<'a> TackyEmitter<'a> {
                     Instruction::JumpIfNotZero(Box::new(v), start_label.clone()),
                 ]);
 
-                self.instructions.push(Instruction::Label(break_label))
+                self.instructions.push(Instruction::Label(break_label));
+
+                self.break_labels.pop();
+                self.continue_labels.pop();
             }
             parser::StmtKind::For {
                 init,
                 cond,
                 post,
                 body,
-                label,
             } => {
-                let label = label
-                    .as_ref()
-                    .expect("label should be present")
-                    .name
-                    .clone();
+                let label = self.make_label();
                 let start_label = format!("{}.start", label);
                 let continue_label = format!("{}.continue", label);
+                self.continue_labels.push(continue_label.clone());
                 let break_label = format!("{}.break", label);
+                self.break_labels.push(break_label.clone());
 
                 match init {
                     parser::ForInit::Decl(decl) => self.visit_decl(decl)?,
@@ -299,6 +319,85 @@ impl<'a> TackyEmitter<'a> {
                     Instruction::Jump(start_label),
                     Instruction::Label(break_label),
                 ]);
+
+                self.break_labels.pop();
+                self.continue_labels.pop();
+            }
+            parser::StmtKind::Switch { expr, body } => {
+                // Annotate switch cases with a label
+                self.case_info.push(VecDeque::new());
+                for case_stmt in &sema::InstructionCollector::collect_cases(body) {
+                    if let parser::StmtKind::Case { expr, .. } = &case_stmt.kind {
+                        let label = self.make_label();
+                        self.case_info
+                            .last_mut()
+                            .unwrap()
+                            .push_back(CaseInfo { expr, label });
+                    }
+                }
+                // Annotate default case with a label
+                if sema::InstructionCollector::collect_default(body).is_some() {
+                    let label = self.make_label();
+                    self.default_info.push(DefaultInfo { label });
+                }
+
+                let sexpr = self.visit_expr(expr)?;
+                let dst_sexpr = self.make_tmp();
+                self.instructions.push(Instruction::Copy(
+                    Box::new(sexpr),
+                    Box::new(dst_sexpr.clone()),
+                ));
+
+                for CaseInfo { expr, label, .. } in self.case_info.last().unwrap().clone() {
+                    let cexpr = self.visit_expr(expr)?;
+                    let dst_cexpr = self.make_tmp();
+                    self.instructions.push(Instruction::Binary(
+                        BinaryOperator::Eq,
+                        Box::new(dst_sexpr.clone()),
+                        Box::new(cexpr.clone()),
+                        Box::new(dst_cexpr.clone()),
+                    ));
+                    self.instructions.push(Instruction::JumpIfNotZero(
+                        Box::new(dst_cexpr),
+                        label.to_string(),
+                    ));
+                }
+
+                let end_label = self.make_label();
+                self.break_labels.push(end_label.clone());
+                if let Some(DefaultInfo { label, .. }) = &self.default_info.last() {
+                    self.instructions.push(Instruction::Jump(label.clone()));
+                } else {
+                    self.instructions.push(Instruction::Jump(end_label.clone()));
+                }
+
+                self.visit_stmt(body)?;
+
+                self.case_info.pop();
+
+                self.instructions
+                    .push(Instruction::Label(end_label.clone()));
+            }
+            parser::StmtKind::Case { body, .. } => {
+                let label = self
+                    .case_info
+                    .last_mut()
+                    .expect("case outside of switch")
+                    .pop_front()
+                    .expect("no label for case")
+                    .label;
+                self.instructions.push(Instruction::Label(label.clone()));
+                self.visit_stmt(body)?;
+            }
+            parser::StmtKind::Default { body } => {
+                let label = self
+                    .default_info
+                    .pop()
+                    .expect("default outside of switch")
+                    .label
+                    .clone();
+                self.instructions.push(Instruction::Label(label.clone()));
+                self.visit_stmt(body)?;
             }
         };
 

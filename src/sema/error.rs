@@ -45,9 +45,9 @@ pub enum SemaError {
         span: SourceSpan,
     },
 
-    #[diagnostic(code(sema::break_outside_loop))]
-    #[error("'break' statement outside of loop")]
-    BreakOutsideLoop {
+    #[diagnostic(code(sema::break_outside_loop_or_switch))]
+    #[error("'break' statement outside of loop or switch")]
+    BreakOutsideLoopOrSwitch {
         #[label]
         span: SourceSpan,
     },
@@ -55,6 +55,35 @@ pub enum SemaError {
     #[diagnostic(code(sema::continue_outside_loop))]
     #[error("'continue' statement outside of loop")]
     ContinueOutsideLoop {
+        #[label]
+        span: SourceSpan,
+    },
+
+    #[diagnostic(code(sema::case_outside_switch))]
+    #[error("'case' statement outside of switch")]
+    CaseOutsideSwitch {
+        #[label]
+        span: SourceSpan,
+    },
+
+    #[diagnostic(code(sema::default_outside_switch))]
+    #[error("'default' statement outside of switch")]
+    DefaultOutsideSwitch {
+        #[label]
+        span: SourceSpan,
+    },
+
+    #[diagnostic(code(sema::duplicate_case))]
+    #[error("Duplicate case value '{value}'")]
+    DuplicateCase {
+        value: String,
+        #[label]
+        span: SourceSpan,
+    },
+
+    #[diagnostic(code(sema::invalid_case_expression))]
+    #[error("Invalid case expression")]
+    InvalidCaseExpression {
         #[label]
         span: SourceSpan,
     },
