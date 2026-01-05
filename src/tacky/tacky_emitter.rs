@@ -82,10 +82,8 @@ impl<'a> TackyEmitter<'a> {
             parser::DeclKind::VarDecl { name, initializer } => {
                 if let Some(initializer) = &initializer {
                     let expr = self.visit_expr(initializer)?;
-                    self.instructions.push(Instruction::Copy(
-                        Box::new(expr),
-                        Box::new(Value::Var(name.clone())),
-                    ));
+                    self.instructions
+                        .push(Instruction::Copy(expr, Value::Var(name.clone())));
                 }
             }
             parser::DeclKind::FunDecl { name, params, body } => {
@@ -154,8 +152,8 @@ impl<'a> TackyEmitter<'a> {
                 let v1 = self.make_tmp();
 
                 self.instructions.extend(vec![
-                    Instruction::Copy(Box::new(cond), Box::new(v1.clone())),
-                    Instruction::JumpIfZero(Box::new(v1), end_label.clone()),
+                    Instruction::Copy(cond, v1.clone()),
+                    Instruction::JumpIfZero(v1, end_label.clone()),
                 ]);
 
                 self.visit_stmt(then)?;
@@ -174,8 +172,8 @@ impl<'a> TackyEmitter<'a> {
                 let v1 = self.make_tmp();
 
                 self.instructions.extend(vec![
-                    Instruction::Copy(Box::new(cond), Box::new(v1.clone())),
-                    Instruction::JumpIfZero(Box::new(v1), else_label.clone()),
+                    Instruction::Copy(cond, v1.clone()),
+                    Instruction::JumpIfZero(v1, else_label.clone()),
                 ]);
 
                 self.visit_stmt(then)?;
@@ -235,8 +233,8 @@ impl<'a> TackyEmitter<'a> {
                 let cond = self.visit_expr(cond)?;
                 let v1 = self.make_tmp();
                 self.instructions.extend(vec![
-                    Instruction::Copy(Box::new(cond), Box::new(v1.clone())),
-                    Instruction::JumpIfZero(Box::new(v1), break_label.clone()),
+                    Instruction::Copy(cond, v1.clone()),
+                    Instruction::JumpIfZero(v1, break_label.clone()),
                 ]);
 
                 self.visit_stmt(body)?;
@@ -268,8 +266,8 @@ impl<'a> TackyEmitter<'a> {
                 let cond = self.visit_expr(cond)?;
                 let v = self.make_tmp();
                 self.instructions.extend(vec![
-                    Instruction::Copy(Box::new(cond), Box::new(v.clone())),
-                    Instruction::JumpIfNotZero(Box::new(v), start_label.clone()),
+                    Instruction::Copy(cond, v.clone()),
+                    Instruction::JumpIfNotZero(v, start_label.clone()),
                 ]);
 
                 self.instructions.push(Instruction::Label(break_label));
@@ -305,8 +303,8 @@ impl<'a> TackyEmitter<'a> {
                     let cond = self.visit_expr(cond)?;
                     let v = self.make_tmp();
                     self.instructions.extend(vec![
-                        Instruction::Copy(Box::new(cond), Box::new(v.clone())),
-                        Instruction::JumpIfZero(Box::new(v), break_label.clone()),
+                        Instruction::Copy(cond, v.clone()),
+                        Instruction::JumpIfZero(v, break_label.clone()),
                     ]);
                 }
 
@@ -347,24 +345,20 @@ impl<'a> TackyEmitter<'a> {
 
                 let sexpr = self.visit_expr(expr)?;
                 let dst_sexpr = self.make_tmp();
-                self.instructions.push(Instruction::Copy(
-                    Box::new(sexpr),
-                    Box::new(dst_sexpr.clone()),
-                ));
+                self.instructions
+                    .push(Instruction::Copy(sexpr, dst_sexpr.clone()));
 
                 for CaseInfo { expr, label, .. } in self.case_info.last().unwrap().clone() {
                     let cexpr = self.visit_expr(expr)?;
                     let dst_cexpr = self.make_tmp();
                     self.instructions.push(Instruction::Binary(
                         BinaryOperator::Eq,
-                        Box::new(dst_sexpr.clone()),
-                        Box::new(cexpr.clone()),
-                        Box::new(dst_cexpr.clone()),
+                        dst_sexpr.clone(),
+                        cexpr.clone(),
+                        dst_cexpr.clone(),
                     ));
-                    self.instructions.push(Instruction::JumpIfNotZero(
-                        Box::new(dst_cexpr),
-                        label.to_string(),
-                    ));
+                    self.instructions
+                        .push(Instruction::JumpIfNotZero(dst_cexpr, label.to_string()));
                 }
 
                 let end_label = self.make_label();
@@ -421,11 +415,8 @@ impl<'a> TackyEmitter<'a> {
                 let dst = self.make_tmp();
                 let expr = self.visit_expr(expr)?;
 
-                self.instructions.push(Instruction::Unary(
-                    op.try_into()?,
-                    Box::new(expr),
-                    Box::new(dst.clone()),
-                ));
+                self.instructions
+                    .push(Instruction::Unary(op.try_into()?, expr, dst.clone()));
 
                 Ok(dst)
             }
@@ -442,12 +433,11 @@ impl<'a> TackyEmitter<'a> {
                         parser::UnaryOperator::PreDec => BinaryOperator::Sub,
                         _ => panic!("invalid unary operator"),
                     },
-                    Box::new(expr.clone()),
-                    Box::new(Value::Constant(1)),
-                    Box::new(dst.clone()),
+                    expr.clone(),
+                    Value::Constant(1),
+                    dst.clone(),
                 ));
-                self.instructions
-                    .push(Instruction::Copy(Box::new(dst.clone()), Box::new(expr)));
+                self.instructions.push(Instruction::Copy(dst.clone(), expr));
 
                 Ok(dst)
             }
@@ -459,22 +449,19 @@ impl<'a> TackyEmitter<'a> {
                 let dst_2 = self.make_tmp();
                 let expr = self.visit_expr(expr)?;
 
-                self.instructions.push(Instruction::Copy(
-                    Box::new(expr.clone()),
-                    Box::new(dst_1.clone()),
-                ));
+                self.instructions
+                    .push(Instruction::Copy(expr.clone(), dst_1.clone()));
                 self.instructions.push(Instruction::Binary(
                     match op {
                         parser::UnaryOperator::PostInc => BinaryOperator::Add,
                         parser::UnaryOperator::PostDec => BinaryOperator::Sub,
                         _ => panic!("invalid unary operator"),
                     },
-                    Box::new(dst_1.clone()),
-                    Box::new(Value::Constant(1)),
-                    Box::new(dst_2.clone()),
+                    dst_1.clone(),
+                    Value::Constant(1),
+                    dst_2.clone(),
                 ));
-                self.instructions
-                    .push(Instruction::Copy(Box::new(dst_2), Box::new(expr)));
+                self.instructions.push(Instruction::Copy(dst_2, expr));
 
                 Ok(dst_1)
             }
@@ -490,11 +477,11 @@ impl<'a> TackyEmitter<'a> {
                 let v1 = self.make_tmp();
 
                 self.instructions.extend(vec![
-                    Instruction::Copy(Box::new(lhs.clone()), Box::new(v1)),
+                    Instruction::Copy(lhs.clone(), v1),
                     if matches!(op, parser::BinaryOperator::And) {
-                        Instruction::JumpIfZero(Box::new(lhs.clone()), other_label.clone())
+                        Instruction::JumpIfZero(lhs.clone(), other_label.clone())
                     } else {
-                        Instruction::JumpIfNotZero(Box::new(lhs.clone()), other_label.clone())
+                        Instruction::JumpIfNotZero(lhs.clone(), other_label.clone())
                     },
                 ]);
 
@@ -503,29 +490,29 @@ impl<'a> TackyEmitter<'a> {
                 let dst = self.make_tmp();
 
                 self.instructions.extend(vec![
-                    Instruction::Copy(Box::new(rhs.clone()), Box::new(v2)),
+                    Instruction::Copy(rhs.clone(), v2),
                     if matches!(op, parser::BinaryOperator::And) {
-                        Instruction::JumpIfZero(Box::new(rhs.clone()), other_label.clone())
+                        Instruction::JumpIfZero(rhs.clone(), other_label.clone())
                     } else {
-                        Instruction::JumpIfNotZero(Box::new(rhs.clone()), other_label.clone())
+                        Instruction::JumpIfNotZero(rhs.clone(), other_label.clone())
                     },
                     Instruction::Copy(
-                        Box::new(if matches!(op, parser::BinaryOperator::And) {
+                        if matches!(op, parser::BinaryOperator::And) {
                             Value::Constant(1)
                         } else {
                             Value::Constant(0)
-                        }),
-                        Box::new(dst.clone()),
+                        },
+                        dst.clone(),
                     ),
                     Instruction::Jump(end_label.clone()),
                     Instruction::Label(other_label.clone()),
                     Instruction::Copy(
-                        Box::new(if matches!(op, parser::BinaryOperator::And) {
+                        if matches!(op, parser::BinaryOperator::And) {
                             Value::Constant(0)
                         } else {
                             Value::Constant(1)
-                        }),
-                        Box::new(dst.clone()),
+                        },
+                        dst.clone(),
                     ),
                     Instruction::Label(end_label.clone()),
                 ]);
@@ -537,12 +524,8 @@ impl<'a> TackyEmitter<'a> {
                 let rhs = self.visit_expr(rhs)?;
                 let dst = self.make_tmp();
 
-                self.instructions.push(Instruction::Binary(
-                    op.try_into()?,
-                    Box::new(lhs),
-                    Box::new(rhs),
-                    Box::new(dst.clone()),
-                ));
+                self.instructions
+                    .push(Instruction::Binary(op.try_into()?, lhs, rhs, dst.clone()));
 
                 Ok(dst)
             }
@@ -551,8 +534,7 @@ impl<'a> TackyEmitter<'a> {
                 let lhs = self.visit_expr(lhs)?;
                 let rhs = self.visit_expr(rhs)?;
 
-                self.instructions
-                    .push(Instruction::Copy(Box::new(rhs), Box::new(lhs.clone())));
+                self.instructions.push(Instruction::Copy(rhs, lhs.clone()));
 
                 Ok(lhs)
             }
@@ -564,15 +546,15 @@ impl<'a> TackyEmitter<'a> {
                 let cond = self.visit_expr(cond)?;
                 let c = self.make_tmp();
                 self.instructions.extend(vec![
-                    Instruction::Copy(Box::new(cond), Box::new(c.clone())),
-                    Instruction::JumpIfZero(Box::new(c), else_label.clone()),
+                    Instruction::Copy(cond, c.clone()),
+                    Instruction::JumpIfZero(c, else_label.clone()),
                 ]);
 
                 let then = self.visit_expr(then)?;
                 let v1 = self.make_tmp();
                 self.instructions.extend(vec![
-                    Instruction::Copy(Box::new(then), Box::new(v1.clone())),
-                    Instruction::Copy(Box::new(v1), Box::new(result.clone())),
+                    Instruction::Copy(then, v1.clone()),
+                    Instruction::Copy(v1, result.clone()),
                     Instruction::Jump(end_label.clone()),
                 ]);
 
@@ -580,8 +562,8 @@ impl<'a> TackyEmitter<'a> {
                 let r#else = self.visit_expr(r#else)?;
                 let v2 = self.make_tmp();
                 self.instructions.extend(vec![
-                    Instruction::Copy(Box::new(r#else), Box::new(v2.clone())),
-                    Instruction::Copy(Box::new(v2), Box::new(result.clone())),
+                    Instruction::Copy(r#else, v2.clone()),
+                    Instruction::Copy(v2, result.clone()),
                 ]);
 
                 self.instructions.push(Instruction::Label(end_label));
@@ -601,8 +583,7 @@ impl<'a> TackyEmitter<'a> {
                 for arg in arguments {
                     let arg = self.visit_expr(arg)?;
                     let dst = self.make_tmp();
-                    self.instructions
-                        .push(Instruction::Copy(Box::new(arg), Box::new(dst.clone())));
+                    self.instructions.push(Instruction::Copy(arg, dst.clone()));
                     args.push(dst.clone());
                 }
 

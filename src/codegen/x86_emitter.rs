@@ -104,15 +104,15 @@ impl<'a> X86Emitter<'a> {
             tacky::Instruction::Unary(op, src, dst) => match op {
                 tacky::UnaryOperator::BNot | tacky::UnaryOperator::Neg => {
                     vec![
-                        Instruction::Mov((*src).into(), (*dst.clone()).into()),
-                        Instruction::Unary(op.into(), (*dst).into()),
+                        Instruction::Mov(src.into(), dst.clone().into()),
+                        Instruction::Unary(op.into(), dst.into()),
                     ]
                 }
                 tacky::UnaryOperator::Not => {
                     vec![
-                        Instruction::Cmp(Operand::Imm(0), (*src).into()),
-                        Instruction::Mov(Operand::Imm(0), (*dst).clone().into()),
-                        Instruction::SetCC(ConditionCode::Eq, (*dst).into()),
+                        Instruction::Cmp(Operand::Imm(0), src.into()),
+                        Instruction::Mov(Operand::Imm(0), dst.clone().into()),
+                        Instruction::SetCC(ConditionCode::Eq, dst.into()),
                     ]
                 }
             },
@@ -124,26 +124,26 @@ impl<'a> X86Emitter<'a> {
                 | tacky::BinaryOperator::BOr
                 | tacky::BinaryOperator::Xor => {
                     vec![
-                        Instruction::Mov((*lhs).into(), (*dst.clone()).into()),
-                        Instruction::Binary(op.try_into()?, (*rhs).into(), (*dst).into()),
+                        Instruction::Mov(lhs.into(), dst.clone().into()),
+                        Instruction::Binary(op.try_into()?, rhs.into(), dst.into()),
                     ]
                 }
                 tacky::BinaryOperator::Div | tacky::BinaryOperator::Mod => {
                     vec![
-                        Instruction::Mov((*lhs).into(), Operand::Reg(Register::Eax)),
+                        Instruction::Mov(lhs.into(), Operand::Reg(Register::Eax)),
                         Instruction::Cdq,
-                        Instruction::Idiv((*rhs).into()),
+                        Instruction::Idiv(rhs.into()),
                         if matches!(op, tacky::BinaryOperator::Div) {
-                            Instruction::Mov(Operand::Reg(Register::Eax), (*dst).into())
+                            Instruction::Mov(Operand::Reg(Register::Eax), dst.into())
                         } else {
-                            Instruction::Mov(Operand::Reg(Register::Edx), (*dst).into())
+                            Instruction::Mov(Operand::Reg(Register::Edx), dst.into())
                         },
                     ]
                 }
                 tacky::BinaryOperator::Shl | tacky::BinaryOperator::Shr => {
                     vec![
-                        Instruction::Mov((*lhs).into(), Operand::Reg(Register::Eax)),
-                        Instruction::Mov((*rhs).into(), Operand::Reg(Register::Ecx)),
+                        Instruction::Mov(lhs.into(), Operand::Reg(Register::Eax)),
+                        Instruction::Mov(rhs.into(), Operand::Reg(Register::Ecx)),
                         Instruction::Binary(
                             if matches!(op, tacky::BinaryOperator::Shl) {
                                 BinaryOperator::Shl
@@ -153,7 +153,7 @@ impl<'a> X86Emitter<'a> {
                             Operand::Reg(Register::Cl),
                             Operand::Reg(Register::Eax),
                         ),
-                        Instruction::Mov(Operand::Reg(Register::Eax), (*dst).into()),
+                        Instruction::Mov(Operand::Reg(Register::Eax), dst.into()),
                     ]
                 }
                 tacky::BinaryOperator::Eq
@@ -163,14 +163,14 @@ impl<'a> X86Emitter<'a> {
                 | tacky::BinaryOperator::Le
                 | tacky::BinaryOperator::Ge => {
                     vec![
-                        Instruction::Cmp((*rhs).into(), (*lhs).into()),
-                        Instruction::Mov(Operand::Imm(0), (*dst).clone().into()),
-                        Instruction::SetCC(op.try_into()?, (*dst).into()),
+                        Instruction::Cmp(rhs.into(), lhs.into()),
+                        Instruction::Mov(Operand::Imm(0), dst.clone().into()),
+                        Instruction::SetCC(op.try_into()?, dst.into()),
                     ]
                 }
             },
             tacky::Instruction::Copy(src, dst) => {
-                vec![Instruction::Mov((*src).into(), (*dst).into())]
+                vec![Instruction::Mov(src.into(), dst.into())]
             }
             tacky::Instruction::Label(label) => {
                 vec![Instruction::Label(label)]
@@ -180,13 +180,13 @@ impl<'a> X86Emitter<'a> {
             }
             tacky::Instruction::JumpIfZero(value, label) => {
                 vec![
-                    Instruction::Cmp((*value).into(), Operand::Imm(0)),
+                    Instruction::Cmp(value.into(), Operand::Imm(0)),
                     Instruction::JmpCC(ConditionCode::Eq, label),
                 ]
             }
             tacky::Instruction::JumpIfNotZero(value, label) => {
                 vec![
-                    Instruction::Cmp((*value).into(), Operand::Imm(0)),
+                    Instruction::Cmp(value.into(), Operand::Imm(0)),
                     Instruction::JmpCC(ConditionCode::Ne, label),
                 ]
             }

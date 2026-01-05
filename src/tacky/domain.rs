@@ -39,13 +39,13 @@ impl std::fmt::Display for FunctionDefinition<'_> {
 #[derive(Debug, Eq, PartialEq)]
 pub enum Instruction {
     Return(Value),
-    Unary(UnaryOperator, Box<Value>, Box<Value>),
-    Binary(BinaryOperator, Box<Value>, Box<Value>, Box<Value>),
-    Copy(Box<Value>, Box<Value>),
+    Unary(UnaryOperator, Value, Value),
+    Binary(BinaryOperator, Value, Value, Value),
+    Copy(Value, Value),
     Label(String),
     Jump(String),
-    JumpIfZero(Box<Value>, String),
-    JumpIfNotZero(Box<Value>, String),
+    JumpIfZero(Value, String),
+    JumpIfNotZero(Value, String),
     FunctionCall(String, Vec<Value>, Value),
 }
 
