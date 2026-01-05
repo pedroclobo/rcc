@@ -2,15 +2,12 @@ mod ast;
 mod error;
 
 pub use ast::{
-    BinaryOperator, BlockItem, Decl, DeclKind, Expr, ExprKind, ForInit, FunctionDefinition, Label,
-    Program, Span, Stmt, StmtKind, UnaryOperator,
+    BinaryOperator, Block, BlockItem, Decl, DeclKind, Expr, ExprKind, ForInit, Label, Param,
+    Program, Span, Stmt, StmtKind, Type, UnaryOperator,
 };
 pub use error::ParserError;
 
-use crate::{
-    lexer::{Lexer, Token, TokenKind},
-    parser::ast::Block,
-};
+use crate::lexer::{Lexer, Token, TokenKind};
 
 use std::{collections::VecDeque, iter::Peekable};
 
@@ -123,12 +120,12 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse(&mut self) -> Result<Program<'a>, ParserError> {
-        let mut functions = Vec::new();
+    pub fn parse(&mut self) -> Result<Program, ParserError> {
+        let mut decls = Vec::new();
         while self.lexer.peek().is_some() {
-            functions.push(self.parse_function_definition()?);
+            decls.push(self.parse_decl()?);
         }
-        Ok(Program { functions })
+        Ok(Program { decls })
     }
 
     fn expect(&mut self, kind: TokenKind) -> Result<Token<'a>, ParserError> {
@@ -181,21 +178,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // <function> ::= "int" <identifier> "(" "void" ")" "{" { <body_item> } "}"
-    fn parse_function_definition(&mut self) -> Result<FunctionDefinition<'a>, ParserError> {
-        self.expect(TokenKind::Int)?;
-
-        let name = self.expect(TokenKind::Identifier)?.lexeme;
-
-        self.expect(TokenKind::LParen)?;
-        self.expect(TokenKind::Void)?;
-        self.expect(TokenKind::RParen)?;
-
-        let body = self.parse_block()?;
-
-        Ok(FunctionDefinition { name, body })
-    }
-
     // <block> ::= { <body_item> }
     fn parse_block(&mut self) -> Result<Block, ParserError> {
         let start = self.expect(TokenKind::LBrace)?.span.start;
@@ -224,7 +206,9 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // <decl> :: "int" <identifier> [ "=" <exp> ] ";"
+    // <decl>     ::= <var_decl> | <fun_decl>
+    // <var_decl> ::= "int" <identifier> [ "=" <exp> ] ";"
+    // <fun_decl> ::= "int" <identifier> "(" <param-list> ")" ( "{" { <block> } "}" | ";" )
     fn parse_decl(&mut self) -> Result<Decl, ParserError> {
         let start = self.expect(TokenKind::Int)?.span.start;
         let id = self.expect(TokenKind::Identifier)?;
@@ -238,9 +222,31 @@ impl<'a> Parser<'a> {
                 let end = initializer.span.end;
 
                 Ok(Decl {
-                    kind: DeclKind {
+                    kind: DeclKind::VarDecl {
                         name,
                         initializer: Some(initializer),
+                    },
+                    span: Span::new(start, end),
+                })
+            }
+            TokenKind::LParen => {
+                self.expect(TokenKind::LParen)?;
+                let params = self.parse_params()?;
+                self.expect(TokenKind::RParen)?;
+
+                let (body, end) = if matches!(self.peek()?.kind, TokenKind::LBrace) {
+                    let body = self.parse_block()?;
+                    let end = body.span.end;
+                    (Some(body), end)
+                } else {
+                    (None, self.expect(TokenKind::Semicolon)?.span.end)
+                };
+
+                Ok(Decl {
+                    kind: DeclKind::FunDecl {
+                        name: name.to_string(),
+                        body,
+                        params,
                     },
                     span: Span::new(start, end),
                 })
@@ -248,7 +254,7 @@ impl<'a> Parser<'a> {
             _ => {
                 self.expect(TokenKind::Semicolon)?;
                 Ok(Decl {
-                    kind: DeclKind {
+                    kind: DeclKind::VarDecl {
                         name,
                         initializer: None,
                     },
@@ -256,6 +262,50 @@ impl<'a> Parser<'a> {
                 })
             }
         }
+    }
+
+    // <param-list> ::= "void" | "int" <identifier> { "," "int" <identifier> }
+    fn parse_params(&mut self) -> Result<Vec<Param>, ParserError> {
+        let mut params = Vec::new();
+
+        loop {
+            match self.peek()?.kind {
+                TokenKind::Int => {
+                    let start = self.expect(TokenKind::Int)?.span.start;
+                    let id = self.expect(TokenKind::Identifier)?;
+                    let end = id.span.end;
+                    let name = id.lexeme.to_string();
+                    params.push(Param {
+                        name,
+                        ty: Type::Int,
+                        span: Span::new(start, end),
+                    });
+                }
+                TokenKind::Void => {
+                    self.expect(TokenKind::Void)?;
+                }
+                TokenKind::Comma => {
+                    self.expect(TokenKind::Comma)?;
+                    if matches!(self.peek()?.kind, TokenKind::RParen) {
+                        return Err(ParserError::ExpectedParameter {
+                            got: TokenKind::RParen,
+                            span: self.peek()?.span.into(),
+                        });
+                    }
+                }
+                TokenKind::RParen => {
+                    break;
+                }
+                kind => {
+                    return Err(ParserError::ExpectedParameter {
+                        got: kind,
+                        span: self.peek()?.span.into(),
+                    });
+                }
+            }
+        }
+
+        Ok(params)
     }
 
     // <stmt> ::= "return" <exp> ";" |
@@ -654,7 +704,7 @@ impl<'a> Parser<'a> {
         Ok(lhs)
     }
 
-    // <factor> ::= constant | <identifier> | "(" <exp> ")" | <prefix_expr>
+    // <factor> ::= constant | <identifier> [ "(" <arg-list> ")" ] | "(" <exp> ")" | <prefix_expr>
     fn parse_factor(&mut self) -> Result<Expr, ParserError> {
         let tok = self.peek()?;
         match tok.kind {
@@ -672,14 +722,27 @@ impl<'a> Parser<'a> {
                     span: tok.span,
                 };
 
-                if let Some(Ok(Token {
-                    kind: TokenKind::PlusPlus | TokenKind::MinusMinus,
-                    ..
-                })) = self.lexer.peek()
-                {
-                    self.parse_postfix_expr(expr)
-                } else {
-                    Ok(expr)
+                match self.lexer.peek() {
+                    Some(Ok(Token {
+                        kind: TokenKind::PlusPlus | TokenKind::MinusMinus,
+                        ..
+                    })) => self.parse_postfix_expr(expr),
+                    Some(Ok(Token {
+                        kind: TokenKind::LParen,
+                        ..
+                    })) => {
+                        self.expect(TokenKind::LParen)?;
+                        let args = self.parse_args()?;
+                        let end = self.expect(TokenKind::RParen)?.span.end;
+                        Ok(Expr {
+                            kind: ExprKind::FunctionCall {
+                                identifier: Box::new(expr),
+                                arguments: args,
+                            },
+                            span: Span::new(tok.span.start, end),
+                        })
+                    }
+                    _ => Ok(expr),
                 }
             }
             TokenKind::LParen => {
@@ -698,6 +761,32 @@ impl<'a> Parser<'a> {
                 span: tok.span.into(),
             }),
         }
+    }
+
+    // <arg-list> ::= <exp> { "," <exp> }
+    fn parse_args(&mut self) -> Result<Vec<Expr>, ParserError> {
+        let mut args = Vec::new();
+        if matches!(self.peek()?.kind, TokenKind::RParen) {
+            return Ok(args);
+        }
+
+        loop {
+            args.push(self.parse_expr()?);
+            match self.peek()?.kind {
+                TokenKind::Comma => {
+                    self.expect(TokenKind::Comma)?;
+                }
+                TokenKind::RParen => {
+                    break;
+                }
+                kind => Err(ParserError::ExpectedArgument {
+                    got: kind,
+                    span: self.peek()?.span.into(),
+                })?,
+            }
+        }
+
+        Ok(args)
     }
 
     // <preexp> ::= <preop> <factor>
@@ -808,6 +897,15 @@ mod tests {
     macro_rules! assign {
         ($left:expr, $right:expr) => {
             expr!(ExprKind::Assignment(Box::new($left), Box::new($right)))
+        };
+    }
+
+    macro_rules! fun_call {
+        ($identifier:expr, $arguments:expr) => {
+            expr!(ExprKind::FunctionCall {
+                identifier: Box::new($identifier),
+                arguments: $arguments,
+            })
         };
     }
 
@@ -931,10 +1029,10 @@ mod tests {
         };
     }
 
-    macro_rules! decl {
+    macro_rules! var_decl {
         ($name:expr) => {
             Decl {
-                kind: DeclKind {
+                kind: DeclKind::VarDecl {
                     name: $name.to_string(),
                     initializer: None,
                 },
@@ -943,10 +1041,43 @@ mod tests {
         };
         ($name:expr, $init:expr) => {
             Decl {
-                kind: DeclKind {
+                kind: DeclKind::VarDecl {
                     name: $name.to_string(),
                     initializer: Some($init),
                 },
+                span: dummy_span!(),
+            }
+        };
+    }
+
+    macro_rules! fun_decl {
+        ($name:expr, $params:expr) => {
+            Decl {
+                kind: DeclKind::FunDecl {
+                    name: $name.to_string(),
+                    params: $params,
+                    body: None,
+                },
+                span: dummy_span!(),
+            }
+        };
+        ($name:expr, $params:expr, $body:expr) => {
+            Decl {
+                kind: DeclKind::FunDecl {
+                    name: $name.to_string(),
+                    params: $params,
+                    body: Some($body),
+                },
+                span: dummy_span!(),
+            }
+        };
+    }
+
+    macro_rules! param {
+        ($name:expr, $type:expr) => {
+            Param {
+                name: $name.to_string(),
+                ty: $type,
                 span: dummy_span!(),
             }
         };
@@ -964,79 +1095,89 @@ mod tests {
     #[test]
     fn return_0() {
         let mut parser = Parser::new("int main(void) { return 0; }");
-        let ast = parser.parse().unwrap();
+        let decl = parser.parse_decl().unwrap();
         assert!(parser.lexer.next().is_none());
 
-        assert_eq!(ast.functions.len(), 1);
-        assert_eq!(ast.functions[0].name, "main");
         assert_eq!(
-            ast.functions[0].body,
-            block![BlockItem::Stmt(return_stmt!(constant!(0)))]
+            decl,
+            fun_decl!(
+                "main",
+                vec![],
+                block![BlockItem::Stmt(return_stmt!(constant!(0)))]
+            )
         );
     }
 
     #[test]
     fn return_2() {
         let mut parser = Parser::new("int main(void) { return 2; }");
-        let ast = parser.parse().unwrap();
+        let decl = parser.parse_decl().unwrap();
         assert!(parser.lexer.next().is_none());
 
-        assert_eq!(ast.functions.len(), 1);
-        assert_eq!(ast.functions[0].name, "main");
         assert_eq!(
-            ast.functions[0].body,
-            block![BlockItem::Stmt(return_stmt!(constant!(2)))]
+            decl,
+            fun_decl!(
+                "main",
+                vec![],
+                block![BlockItem::Stmt(return_stmt!(constant!(2)))]
+            )
         );
     }
 
     #[test]
     fn return_minus_2() {
         let mut parser = Parser::new("int main(void) { return -2; }");
-        let ast = parser.parse().unwrap();
+        let decl = parser.parse_decl().unwrap();
         assert!(parser.lexer.next().is_none());
 
-        assert_eq!(ast.functions.len(), 1);
-        assert_eq!(ast.functions[0].name, "main");
         assert_eq!(
-            ast.functions[0].body,
-            block![BlockItem::Stmt(return_stmt!(unary!(
-                UnaryOperator::Neg,
-                constant!(2)
-            )))]
+            decl,
+            fun_decl!(
+                "main",
+                vec![],
+                block![BlockItem::Stmt(return_stmt!(unary!(
+                    UnaryOperator::Neg,
+                    constant!(2)
+                )))]
+            )
         );
     }
 
     #[test]
     fn return_neg_2() {
         let mut parser = Parser::new("int main(void) { return ~2; }");
-        let ast = parser.parse().unwrap();
+        let decl = parser.parse_decl().unwrap();
         assert!(parser.lexer.next().is_none());
 
-        assert_eq!(ast.functions.len(), 1);
-        assert_eq!(ast.functions[0].name, "main");
         assert_eq!(
-            ast.functions[0].body,
-            block![BlockItem::Stmt(return_stmt!(unary!(
-                UnaryOperator::BNot,
-                constant!(2)
-            )))]
+            decl,
+            fun_decl!(
+                "main",
+                vec![],
+                block![BlockItem::Stmt(return_stmt!(unary!(
+                    UnaryOperator::BNot,
+                    constant!(2)
+                )))]
+            )
         );
     }
 
     #[test]
     fn return_neg_minus_2() {
         let mut parser = Parser::new("int main(void) { return ~(-2); }");
-        let ast = parser.parse().unwrap();
+        let decl = parser.parse_decl().unwrap();
         assert!(parser.lexer.next().is_none());
 
-        assert_eq!(ast.functions.len(), 1);
-        assert_eq!(ast.functions[0].name, "main");
         assert_eq!(
-            ast.functions[0].body,
-            block![BlockItem::Stmt(return_stmt!(unary!(
-                UnaryOperator::BNot,
-                unary!(UnaryOperator::Neg, constant!(2))
-            )))]
+            decl,
+            fun_decl!(
+                "main",
+                vec![],
+                block![BlockItem::Stmt(return_stmt!(unary!(
+                    UnaryOperator::BNot,
+                    unary!(UnaryOperator::Neg, constant!(2))
+                )))]
+            )
         );
     }
 
@@ -1131,7 +1272,7 @@ mod tests {
         let decl = parser.parse_decl().unwrap();
         assert!(parser.lexer.next().is_none());
 
-        assert_eq!(decl, decl!("i"));
+        assert_eq!(decl, var_decl!("i"));
     }
 
     #[test]
@@ -1142,7 +1283,7 @@ mod tests {
 
         assert_eq!(
             decl,
-            decl!(
+            var_decl!(
                 "i",
                 binary!(BinaryOperator::Add, constant!(3), constant!(1))
             )
@@ -1400,7 +1541,7 @@ mod tests {
         assert_eq!(
             stmt,
             for_stmt!(
-                ForInit::Decl(decl!("i", constant!(0))),
+                ForInit::Decl(var_decl!("i", constant!(0))),
                 Some(binary!(BinaryOperator::Lt, var!("i"), constant!(10))),
                 Some(assign!(
                     var!("i"),
@@ -1478,6 +1619,48 @@ mod tests {
                     default_stmt!(return_stmt!(constant!(1)))
                 )
             )
+        );
+    }
+
+    #[test]
+    fn fun_decl() {
+        let mut parser = Parser::new("int x(void);");
+        let decl = parser.parse_decl().unwrap();
+        assert!(parser.lexer.next().is_none());
+
+        assert_eq!(decl, fun_decl!("x", vec![]));
+    }
+
+    #[test]
+    fn fun_decl_with_params() {
+        let mut parser = Parser::new("int x(int i, int j);");
+        let decl = parser.parse_decl().unwrap();
+        assert!(parser.lexer.next().is_none());
+
+        assert_eq!(
+            decl,
+            fun_decl!("x", vec![param!("i", Type::Int), param!("j", Type::Int)])
+        );
+    }
+
+    #[test]
+    fn fun_call() {
+        let mut parser = Parser::new("x()");
+        let expr = parser.parse_expr().unwrap();
+        assert!(parser.lexer.next().is_none());
+
+        assert_eq!(expr, fun_call!(var!("x"), vec![]));
+    }
+
+    #[test]
+    fn fun_call_with_args() {
+        let mut parser = Parser::new("x(1, 2, 3)");
+        let expr = parser.parse_expr().unwrap();
+        assert!(parser.lexer.next().is_none());
+
+        assert_eq!(
+            expr,
+            fun_call!(var!("x"), vec![constant!(1), constant!(2), constant!(3)])
         );
     }
 }

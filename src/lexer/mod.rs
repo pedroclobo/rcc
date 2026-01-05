@@ -375,6 +375,11 @@ impl<'a> Iterator for Lexer<'a> {
                 ":",
                 Span::new(start, self.idx),
             )),
+            ',' => Ok(Token::new(
+                TokenKind::Comma,
+                ",",
+                Span::new(start, self.idx),
+            )),
 
             '0'..='9' => self
                 .consume_constant()
@@ -650,5 +655,10 @@ mod tests {
                 tok(TokenKind::Default, "default"),
             ]
         );
+    }
+
+    #[test]
+    fn comma() {
+        assert_eq!(lex(",").unwrap(), vec![tok(TokenKind::Comma, ","),]);
     }
 }

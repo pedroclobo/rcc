@@ -85,6 +85,7 @@ pub enum TokenKind {
     Switch,
     Case,
     Default,
+    Comma,
 }
 
 impl std::fmt::Display for TokenKind {
@@ -151,6 +152,7 @@ impl std::fmt::Display for TokenKind {
                 Switch => "'switch'",
                 Case => "'case'",
                 Default => "'default'",
+                Comma => "','",
             }
         )
     }

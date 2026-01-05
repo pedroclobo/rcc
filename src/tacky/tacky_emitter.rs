@@ -63,11 +63,11 @@ impl<'a> TackyEmitter<'a> {
         tmp
     }
 
-    pub fn visit_program(&mut self, program: &'a parser::Program<'a>) -> Result<(), TackyError> {
+    pub fn visit_program(&mut self, program: &'a parser::Program) -> Result<(), TackyError> {
         let mut functions = Vec::new();
 
-        for function in &program.functions {
-            self.visit_function_definition(function)?;
+        for decl in &program.decls {
+            self.visit_decl(decl)?;
             if let Some(function) = self.function.take() {
                 functions.push(function);
             }
@@ -77,50 +77,54 @@ impl<'a> TackyEmitter<'a> {
         Ok(())
     }
 
-    fn visit_function_definition(
-        &mut self,
-        function_definition: &'a parser::FunctionDefinition<'a>,
-    ) -> Result<(), TackyError> {
-        let mut has_return = false;
-        for item in &function_definition.body {
-            if let parser::BlockItem::Stmt(parser::Stmt {
-                kind: parser::StmtKind::Return(_),
-                ..
-            }) = item
-            {
-                has_return = true;
+    fn visit_decl(&mut self, decl: &'a parser::Decl) -> Result<(), TackyError> {
+        match &decl.kind {
+            parser::DeclKind::VarDecl { name, initializer } => {
+                if let Some(initializer) = &initializer {
+                    let expr = self.visit_expr(initializer)?;
+                    self.instructions.push(Instruction::Copy(
+                        Box::new(expr),
+                        Box::new(Value::Var(name.clone())),
+                    ));
+                }
             }
-        }
+            parser::DeclKind::FunDecl { name, params, body } => {
+                if let Some(body) = body {
+                    let mut has_return = false;
+                    for item in body {
+                        if let parser::BlockItem::Stmt(parser::Stmt {
+                            kind: parser::StmtKind::Return(_),
+                            ..
+                        }) = item
+                        {
+                            has_return = true;
+                        }
+                    }
 
-        for item in &function_definition.body {
-            match item {
-                parser::BlockItem::Decl(decl) => self.visit_decl(decl)?,
-                parser::BlockItem::Stmt(stmt) => self.visit_stmt(stmt)?,
+                    let mut tacky_params = Vec::new();
+                    for param in params {
+                        tacky_params.push(param.name.clone());
+                    }
+
+                    for item in body {
+                        match item {
+                            parser::BlockItem::Decl(decl) => self.visit_decl(decl)?,
+                            parser::BlockItem::Stmt(stmt) => self.visit_stmt(stmt)?,
+                        }
+                    }
+
+                    if !has_return {
+                        self.instructions
+                            .push(Instruction::Return(Value::Constant(0)));
+                    }
+
+                    self.function = Some(FunctionDefinition {
+                        name,
+                        params: tacky_params,
+                        body: self.instructions.drain(..).collect(),
+                    });
+                }
             }
-        }
-
-        if function_definition.name == "main" && !has_return {
-            self.instructions
-                .push(Instruction::Return(Value::Constant(0)));
-        }
-
-        self.function = Some(FunctionDefinition {
-            name: function_definition.name,
-            body: self.instructions.drain(..).collect(),
-        });
-
-        Ok(())
-    }
-
-    fn visit_decl(&mut self, decl: &parser::Decl) -> Result<(), TackyError> {
-        let parser::Decl { kind, .. } = decl;
-
-        if let Some(initializer) = &kind.initializer {
-            let expr = self.visit_expr(initializer)?;
-            self.instructions.push(Instruction::Copy(
-                Box::new(expr),
-                Box::new(Value::Var(kind.name.clone())),
-            ));
         }
 
         Ok(())
@@ -583,6 +587,33 @@ impl<'a> TackyEmitter<'a> {
                 self.instructions.push(Instruction::Label(end_label));
 
                 Ok(result)
+            }
+            parser::ExprKind::FunctionCall {
+                identifier,
+                arguments,
+            } => {
+                let identifier = match &identifier.kind {
+                    parser::ExprKind::Var(v) => v,
+                    _ => panic!("invalid function"),
+                };
+
+                let mut args = Vec::new();
+                for arg in arguments {
+                    let arg = self.visit_expr(arg)?;
+                    let dst = self.make_tmp();
+                    self.instructions
+                        .push(Instruction::Copy(Box::new(arg), Box::new(dst.clone())));
+                    args.push(dst.clone());
+                }
+
+                let dst = self.make_tmp();
+                self.instructions.push(Instruction::FunctionCall(
+                    identifier.clone(),
+                    args,
+                    dst.clone(),
+                ));
+
+                Ok(dst)
             }
         }
     }

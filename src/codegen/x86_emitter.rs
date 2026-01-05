@@ -8,6 +8,8 @@ pub struct X86Emitter<'a> {
     program: Option<Program<'a>>,
     function: Option<FunctionDefinition<'a>>,
 
+    functions: Vec<String>,
+
     instructions: Vec<Instruction>,
 }
 
@@ -22,6 +24,9 @@ impl<'a> X86Emitter<'a> {
         X86Emitter {
             program: None,
             function: None,
+
+            functions: Vec::new(),
+
             instructions: Vec::new(),
         }
     }
@@ -42,6 +47,10 @@ impl<'a> X86Emitter<'a> {
         for function in program.functions {
             self.visit_function_definition(function)?;
             if let Some(function) = self.function.take() {
+                // TODO: `self.function` holds the names of functions defined in
+                // the same translation unit. This is only needed to know when to
+                // call `f` vs `f@PLT`.
+                self.functions.push(function.name.to_string());
                 functions.push(function);
             }
         }
@@ -53,8 +62,25 @@ impl<'a> X86Emitter<'a> {
 
     fn visit_function_definition(
         &mut self,
-        function_definition: crate::tacky::FunctionDefinition<'a>,
+        function_definition: tacky::FunctionDefinition<'a>,
     ) -> Result<(), X86EmitterError> {
+        for (i, param) in function_definition.params.iter().enumerate() {
+            if i < 6 {
+                self.instructions.push(Instruction::Mov(
+                    Operand::Reg(Register::arg(i)),
+                    Operand::PseudoReg(param.to_string()),
+                ));
+            } else {
+                self.instructions.push(Instruction::Mov(
+                    Operand::Stack {
+                        size: 4,
+                        offset: 8 * (i - 6 + 2) as i32,
+                    },
+                    Operand::PseudoReg(param.to_string()),
+                ));
+            }
+        }
+
         for instruction in function_definition.body {
             self.visit_instruction(instruction)?;
         }
@@ -67,8 +93,8 @@ impl<'a> X86Emitter<'a> {
         Ok(())
     }
 
-    fn visit_instruction(&mut self, statement: tacky::Instruction) -> Result<(), X86EmitterError> {
-        self.instructions.extend(match statement {
+    fn visit_instruction(&mut self, instr: tacky::Instruction) -> Result<(), X86EmitterError> {
+        self.instructions.extend(match instr {
             tacky::Instruction::Return(value) => {
                 vec![
                     Instruction::Mov(value.into(), Operand::Reg(Register::Eax)),
@@ -163,6 +189,65 @@ impl<'a> X86Emitter<'a> {
                     Instruction::Cmp((*value).into(), Operand::Imm(0)),
                     Instruction::JmpCC(ConditionCode::Ne, label),
                 ]
+            }
+            tacky::Instruction::FunctionCall(func, args, dst) => {
+                let mut instructions = Vec::new();
+
+                let mut iter = args.iter();
+                for (i, arg) in iter.by_ref().enumerate().take(6) {
+                    instructions.push(Instruction::Mov(
+                        arg.clone().into(),
+                        Operand::Reg(Register::arg(i)),
+                    ));
+                }
+
+                // The stack pointer must be 16-byte after the `call` instruction.
+                // As `call` pushes the return address onto the stack, we need
+                // to ensure that `rsp % 16 == 8`. As local stack space is always
+                // a multiple of 16, we just need to align the stack pointer when
+                // passing an odd number of stack arguments.
+                let mut stack_alignment = 0;
+                if args.len() > 6 && args.len() % 2 != 0 {
+                    stack_alignment = 8;
+                    instructions.push(Instruction::Binary(
+                        BinaryOperator::Sub,
+                        Operand::Imm(8),
+                        Operand::Reg(Register::Rsp),
+                    ));
+                }
+
+                let mut stack_offset = 0;
+                for arg in iter.rev() {
+                    let arg = arg.clone().into();
+                    stack_offset += 8;
+                    match arg {
+                        Operand::Imm(_) | Operand::Reg(_) => {
+                            instructions.push(Instruction::Push(arg.clone()));
+                        }
+                        Operand::PseudoReg(_) | Operand::Stack { .. } => {
+                            instructions
+                                .push(Instruction::Mov(arg.clone(), Operand::Reg(Register::Eax)));
+                            instructions.push(Instruction::Push(Operand::Reg(Register::Rax)));
+                        }
+                    }
+                }
+
+                if self.functions.contains(&func) {
+                    instructions.push(Instruction::Call(func));
+                } else {
+                    instructions.push(Instruction::Call(format!("{}@PLT", func)));
+                }
+
+                instructions.extend(vec![
+                    Instruction::Binary(
+                        BinaryOperator::Add,
+                        Operand::Imm(stack_alignment + stack_offset),
+                        Operand::Reg(Register::Rsp),
+                    ),
+                    Instruction::Mov(Operand::Reg(Register::Eax), dst.clone().into()),
+                ]);
+
+                instructions
             }
         });
 

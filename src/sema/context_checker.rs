@@ -14,16 +14,20 @@ impl<'a> ContextChecker {
         }
     }
 
-    pub fn run(&mut self, program: &'a parser::Program<'_>) -> Result<(), SemaError> {
+    pub fn run(&mut self, program: &'a parser::Program) -> Result<(), SemaError> {
         self.check(program)?;
         Ok(())
     }
 
-    fn check(&mut self, program: &'a parser::Program<'_>) -> Result<(), SemaError> {
-        for function in &program.functions {
-            for instruction in &function.body {
-                if let parser::BlockItem::Stmt(stmt) = instruction {
-                    self.check_stmt(stmt)?;
+    fn check(&mut self, program: &'a parser::Program) -> Result<(), SemaError> {
+        for decl in &program.decls {
+            if let parser::DeclKind::FunDecl { body, .. } = &decl.kind
+                && let Some(body) = body
+            {
+                for instruction in body {
+                    if let parser::BlockItem::Stmt(stmt) = instruction {
+                        self.check_stmt(stmt)?;
+                    }
                 }
             }
         }

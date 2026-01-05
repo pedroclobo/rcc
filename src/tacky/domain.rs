@@ -9,7 +9,7 @@ pub struct Program<'a> {
 impl std::fmt::Display for Program<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for function in &self.functions {
-            write!(f, "{}", function)?;
+            writeln!(f, "{}", function)?;
         }
         Ok(())
     }
@@ -18,12 +18,13 @@ impl std::fmt::Display for Program<'_> {
 #[derive(Debug)]
 pub struct FunctionDefinition<'a> {
     pub name: &'a str,
+    pub params: Vec<String>,
     pub body: Vec<Instruction>,
 }
 
 impl std::fmt::Display for FunctionDefinition<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "{}:", self.name)?;
+        writeln!(f, "{}({}):", self.name, self.params.join(", "))?;
         for instruction in &self.body {
             match instruction {
                 Instruction::Label(_) => writeln!(f, "{}", instruction)?,
@@ -34,6 +35,7 @@ impl std::fmt::Display for FunctionDefinition<'_> {
     }
 }
 
+// TODO: remove Box from Value
 #[derive(Debug, Eq, PartialEq)]
 pub enum Instruction {
     Return(Value),
@@ -44,6 +46,7 @@ pub enum Instruction {
     Jump(String),
     JumpIfZero(Box<Value>, String),
     JumpIfNotZero(Box<Value>, String),
+    FunctionCall(String, Vec<Value>, Value),
 }
 
 impl std::fmt::Display for Instruction {
@@ -59,6 +62,18 @@ impl std::fmt::Display for Instruction {
             Instruction::Jump(label) => write!(f, "jmp {}", label),
             Instruction::JumpIfZero(value, label) => write!(f, "jz {} {}", value, label),
             Instruction::JumpIfNotZero(value, label) => write!(f, "jnz {} {}", value, label),
+            Instruction::FunctionCall(identifier, args, dst) => {
+                write!(
+                    f,
+                    "{} = {}({})",
+                    dst,
+                    identifier,
+                    args.iter()
+                        .map(|p| p.to_string())
+                        .collect::<Vec<String>>()
+                        .join(", ")
+                )
+            }
         }
     }
 }

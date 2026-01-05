@@ -61,6 +61,7 @@ pub enum Instruction {
     JmpCC(ConditionCode, String),
     SetCC(ConditionCode, Operand),
     Cmp(Operand, Operand),
+    Call(String),
 }
 
 impl Instruction {
@@ -79,6 +80,7 @@ impl Instruction {
             Instruction::JmpCC(_, _) => vec![],
             Instruction::SetCC(_, op) => vec![op],
             Instruction::Cmp(lhs, rhs) => vec![lhs, rhs],
+            Instruction::Call(_) => vec![],
         }
         .into_iter()
     }
@@ -98,6 +100,7 @@ impl Instruction {
             Instruction::JmpCC(_, _) => vec![],
             Instruction::SetCC(_, op) => vec![op],
             Instruction::Cmp(lhs, rhs) => vec![lhs, rhs],
+            Instruction::Call(_) => vec![],
         }
         .into_iter()
     }
@@ -143,6 +146,7 @@ impl std::fmt::Display for Instruction {
                 op
             ),
             Instruction::Cmp(lhs, rhs) => write!(f, "cmp\t{}, {}", rhs, lhs),
+            Instruction::Call(func) => write!(f, "call\t{}", func),
         }
     }
 }
@@ -291,7 +295,7 @@ impl std::fmt::Display for Operand {
             Operand::Stack { size, offset } => {
                 write!(
                     f,
-                    "{} [rsp {}]",
+                    "{} [rbp {}]",
                     match size {
                         1 => "byte ptr",
                         2 => "word ptr",
@@ -314,6 +318,7 @@ impl std::fmt::Display for Operand {
 pub enum Register {
     Al,
     Eax,
+    Rax,
     Ecx,
     Dl,
     Edx,
@@ -324,6 +329,25 @@ pub enum Register {
     R11b,
     R11d,
     Cl,
+    Edi,
+    Esi,
+    R8d,
+    R9d,
+    R10,
+}
+
+impl Register {
+    pub fn arg(i: usize) -> Self {
+        match i {
+            0 => Register::Edi,
+            1 => Register::Esi,
+            2 => Register::Edx,
+            3 => Register::Ecx,
+            4 => Register::R8d,
+            5 => Register::R9d,
+            _ => panic!("Invalid argument index"),
+        }
+    }
 }
 
 impl std::fmt::Display for Register {
@@ -341,6 +365,12 @@ impl std::fmt::Display for Register {
             Register::Dl => write!(f, "dl"),
             Register::R10b => write!(f, "r10b"),
             Register::R11b => write!(f, "r11b"),
+            Register::Edi => write!(f, "edi"),
+            Register::Esi => write!(f, "esi"),
+            Register::R8d => write!(f, "r8d"),
+            Register::R9d => write!(f, "r9d"),
+            Register::Rax => write!(f, "rax"),
+            Register::R10 => write!(f, "r10"),
         }
     }
 }

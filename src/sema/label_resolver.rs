@@ -2,28 +2,36 @@ use crate::parser::{self, BlockItem};
 
 use super::SemaError;
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 pub struct LabelResolver {
-    labels: HashSet<String>,
+    labels: HashMap<String, String>,
+    counter: u32,
 }
 
 impl LabelResolver {
     pub fn new() -> Self {
         LabelResolver {
-            labels: HashSet::new(),
+            labels: HashMap::new(),
+            counter: 0,
         }
     }
 
-    pub fn run(&mut self, program: &mut parser::Program<'_>) -> Result<(), SemaError> {
-        self.collect_labels(program)?;
-        self.resolve_labels(program)?;
+    pub fn run(&mut self, program: &mut parser::Program) -> Result<(), SemaError> {
+        for decl in &mut program.decls {
+            self.labels.clear();
+            self.collect_decl(decl)?;
+            self.resolve_decl(decl)?;
+        }
+
         Ok(())
     }
 
-    fn collect_labels(&mut self, program: &mut parser::Program<'_>) -> Result<(), SemaError> {
-        for function in &mut program.functions {
-            for instruction in &mut function.body {
+    fn collect_decl(&mut self, decl: &mut parser::Decl) -> Result<(), SemaError> {
+        if let parser::DeclKind::FunDecl { body, .. } = &mut decl.kind
+            && let Some(body) = body
+        {
+            for instruction in body {
                 if let BlockItem::Stmt(stmt) = instruction {
                     self.collect_stmt(stmt)?;
                 }
@@ -37,13 +45,15 @@ impl LabelResolver {
 
         match kind {
             parser::StmtKind::Labeled { label, stmt } => {
-                if self.labels.contains(&label.name) {
+                if self.labels.contains_key(&label.name) {
                     return Err(SemaError::DuplicateLabelDeclaration {
                         label: label.name.clone(),
                         span: label.span.into(),
                     });
                 }
-                self.labels.insert(label.name.clone());
+                let new_label = self.mk_label(label.name.clone());
+                self.labels.insert(label.name.clone(), new_label.clone());
+                label.name = new_label;
                 self.collect_stmt(stmt)?;
             }
             parser::StmtKind::Block(block) => {
@@ -79,9 +89,11 @@ impl LabelResolver {
         Ok(())
     }
 
-    fn resolve_labels(&mut self, program: &mut parser::Program<'_>) -> Result<(), SemaError> {
-        for function in &mut program.functions {
-            for instruction in &mut function.body {
+    fn resolve_decl(&mut self, decl: &mut parser::Decl) -> Result<(), SemaError> {
+        if let parser::DeclKind::FunDecl { body, .. } = &mut decl.kind
+            && let Some(body) = body
+        {
+            for instruction in body {
                 if let BlockItem::Stmt(stmt) = instruction {
                     self.resolve_stmt(stmt)?;
                 }
@@ -121,12 +133,17 @@ impl LabelResolver {
                 self.resolve_stmt(body)?;
             }
             parser::StmtKind::Goto(label) => {
-                if !self.labels.contains(&label.name) {
+                if !self.labels.contains_key(&label.name) {
                     return Err(SemaError::UndeclaredLabel {
                         label: label.name.clone(),
                         span: label.span.into(),
                     });
                 }
+                label.name = self
+                    .labels
+                    .get(&label.name)
+                    .expect("undeclared label")
+                    .clone();
             }
             parser::StmtKind::Return(_) => {}
             parser::StmtKind::Expr(_) => {}
@@ -135,6 +152,12 @@ impl LabelResolver {
         };
 
         Ok(())
+    }
+
+    fn mk_label(&mut self, name: String) -> String {
+        let label = format!("{}.{}", name, self.counter);
+        self.counter += 1;
+        label
     }
 }
 

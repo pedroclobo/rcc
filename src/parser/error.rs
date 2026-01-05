@@ -37,6 +37,22 @@ pub enum ParserError {
         span: SourceSpan,
     },
 
+    #[diagnostic(code(parser::expected_parameter))]
+    #[error("Expected parameter, got {}", got)]
+    ExpectedParameter {
+        got: TokenKind,
+        #[label]
+        span: SourceSpan,
+    },
+
+    #[diagnostic(code(parser::expected_argument))]
+    #[error("Expected argument, got {}", got)]
+    ExpectedArgument {
+        got: TokenKind,
+        #[label]
+        span: SourceSpan,
+    },
+
     #[diagnostic(code(parser::invalid_unary_operator))]
     #[error("Invalid unary operator: {}", op)]
     InvalidUnaryOperator {

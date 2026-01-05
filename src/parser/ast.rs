@@ -31,14 +31,8 @@ impl From<Span> for SourceSpan {
 }
 
 #[derive(Debug)]
-pub struct Program<'a> {
-    pub functions: Vec<FunctionDefinition<'a>>,
-}
-
-#[derive(Debug)]
-pub struct FunctionDefinition<'a> {
-    pub name: &'a str,
-    pub body: Block,
+pub struct Program {
+    pub decls: Vec<Decl>,
 }
 
 #[derive(Debug, Clone)]
@@ -115,10 +109,58 @@ impl PartialEq for Decl {
 impl Eq for Decl {}
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct DeclKind {
-    pub name: String,
-    pub initializer: Option<Expr>,
+pub enum DeclKind {
+    VarDecl {
+        name: String,
+        initializer: Option<Expr>,
+    },
+    FunDecl {
+        name: String,
+        params: Vec<Param>,
+        body: Option<Block>,
+    },
 }
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum Type {
+    Int,
+    FunType { ret: Box<Type>, params: Vec<Type> },
+}
+
+impl std::fmt::Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Type::Int => write!(f, "int"),
+            Type::FunType { ret, params } => {
+                write!(
+                    f,
+                    "({})",
+                    params
+                        .iter()
+                        .map(|ty| ty.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )?;
+                write!(f, " -> {}", ret)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Param {
+    pub name: String,
+    pub ty: Type,
+    pub span: Span,
+}
+
+impl PartialEq for Param {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.ty == other.ty
+    }
+}
+
+impl Eq for Param {}
 
 #[derive(Debug, Clone)]
 pub struct Stmt {
@@ -348,5 +390,9 @@ pub enum ExprKind {
         cond: Box<Expr>,
         then: Box<Expr>,
         r#else: Box<Expr>,
+    },
+    FunctionCall {
+        identifier: Box<Expr>,
+        arguments: Vec<Expr>,
     },
 }
