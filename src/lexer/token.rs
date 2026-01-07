@@ -86,6 +86,8 @@ pub enum TokenKind {
     Case,
     Default,
     Comma,
+    Static,
+    Extern,
 }
 
 impl std::fmt::Display for TokenKind {
@@ -153,6 +155,8 @@ impl std::fmt::Display for TokenKind {
                 Case => "'case'",
                 Default => "'default'",
                 Comma => "','",
+                Static => "'static'",
+                Extern => "'extern'",
             }
         )
     }

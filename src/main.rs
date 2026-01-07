@@ -1,8 +1,5 @@
 use clap::Parser;
-use miette::{
-    GraphicalReportHandler, GraphicalTheme, IntoDiagnostic, NamedSource, ThemeCharacters,
-    ThemeStyles,
-};
+use miette::{IntoDiagnostic, NamedSource};
 use rcc::{codegen::X86Emitter, lexer::Lexer, tacky::TackyEmitter};
 use std::io::Write;
 use std::{fs::File, path::PathBuf, process::Command};
@@ -118,29 +115,29 @@ fn compile(
     let source = NamedSource::new(c_file.display().to_string(), prog.to_string());
 
     // Set up custom miette reporter with minimal theme
-    miette::set_hook(Box::new(|_| {
-        Box::new(
-            GraphicalReportHandler::default().with_theme(GraphicalTheme {
-                characters: ThemeCharacters {
-                    hbar: ' ',
-                    vbar: ' ',
-                    xbar: ' ',
-                    vbar_break: ' ',
-                    ltop: ' ',
-                    rtop: ' ',
-                    mtop: ' ',
-                    lbot: ' ',
-                    rbot: ' ',
-                    mbot: ' ',
-                    error: "->".into(),
-                    warning: "".into(),
-                    advice: "".into(),
-                    ..ThemeCharacters::ascii()
-                },
-                styles: ThemeStyles::rgb(),
-            }),
-        )
-    }))?;
+    // miette::set_hook(Box::new(|_| {
+    //     Box::new(
+    //         GraphicalReportHandler::default().with_theme(GraphicalTheme {
+    //             characters: ThemeCharacters {
+    //                 hbar: ' ',
+    //                 vbar: ' ',
+    //                 xbar: ' ',
+    //                 vbar_break: ' ',
+    //                 ltop: ' ',
+    //                 rtop: ' ',
+    //                 mtop: ' ',
+    //                 lbot: ' ',
+    //                 rbot: ' ',
+    //                 mbot: ' ',
+    //                 error: "->".into(),
+    //                 warning: "".into(),
+    //                 advice: "".into(),
+    //                 ..ThemeCharacters::ascii()
+    //             },
+    //             styles: ThemeStyles::rgb(),
+    //         }),
+    //     )
+    // }))?;
 
     let _tokens = Lexer::new(prog)
         .lex()
@@ -154,7 +151,7 @@ fn compile(
     sema.run(&mut ast)
         .map_err(|e| miette::Report::new(e).with_source_code(source.clone()))?;
 
-    let mut tacky_emitter = TackyEmitter::new();
+    let mut tacky_emitter = TackyEmitter::new(&sema);
     tacky_emitter
         .visit_program(&ast)
         .map_err(|e| miette::Report::new(e).with_source_code(source.clone()))?;
@@ -162,7 +159,7 @@ fn compile(
         .get_program()
         .expect("There should be a program");
 
-    let mut emitter = X86Emitter::new();
+    let mut emitter = X86Emitter::new(&sema);
     emitter.visit_program(prog).into_diagnostic()?;
     let prog = emitter.get_program().expect("There should be a program");
 
@@ -221,29 +218,29 @@ fn run(
     let source = NamedSource::new(c_file.display().to_string(), prog.to_string());
 
     // Set up custom miette reporter with minimal theme
-    miette::set_hook(Box::new(|_| {
-        Box::new(
-            GraphicalReportHandler::default().with_theme(GraphicalTheme {
-                characters: ThemeCharacters {
-                    hbar: ' ',
-                    vbar: ' ',
-                    xbar: ' ',
-                    vbar_break: ' ',
-                    ltop: ' ',
-                    rtop: ' ',
-                    mtop: ' ',
-                    lbot: ' ',
-                    rbot: ' ',
-                    mbot: ' ',
-                    error: "->".into(),
-                    warning: "".into(),
-                    advice: "".into(),
-                    ..ThemeCharacters::ascii()
-                },
-                styles: ThemeStyles::rgb(),
-            }),
-        )
-    }))?;
+    // miette::set_hook(Box::new(|_| {
+    //     Box::new(
+    //         GraphicalReportHandler::default().with_theme(GraphicalTheme {
+    //             characters: ThemeCharacters {
+    //                 hbar: ' ',
+    //                 vbar: ' ',
+    //                 xbar: ' ',
+    //                 vbar_break: ' ',
+    //                 ltop: ' ',
+    //                 rtop: ' ',
+    //                 mtop: ' ',
+    //                 lbot: ' ',
+    //                 rbot: ' ',
+    //                 mbot: ' ',
+    //                 error: "->".into(),
+    //                 warning: "".into(),
+    //                 advice: "".into(),
+    //                 ..ThemeCharacters::ascii()
+    //             },
+    //             styles: ThemeStyles::rgb(),
+    //         }),
+    //     )
+    // }))?;
 
     let tokens = Lexer::new(prog)
         .lex()
@@ -270,7 +267,7 @@ fn run(
         return Ok(());
     }
 
-    let mut tacky_emitter = TackyEmitter::new();
+    let mut tacky_emitter = TackyEmitter::new(&sema);
     tacky_emitter
         .visit_program(&ast)
         .map_err(|e| miette::Report::new(e).with_source_code(source.clone()))?;
@@ -282,7 +279,7 @@ fn run(
         return Ok(());
     }
 
-    let mut emitter = X86Emitter::new();
+    let mut emitter = X86Emitter::new(&sema);
     emitter.visit_program(prog).into_diagnostic()?;
     let prog = emitter.get_program().expect("There should be a program");
     if args.codegen {

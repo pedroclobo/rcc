@@ -1,6 +1,6 @@
 use crate::parser;
 
-use super::SemaError;
+use super::{Linkage, SemaError};
 
 use std::collections::{HashMap, HashSet};
 
@@ -9,17 +9,13 @@ pub struct VariableResolver {
     counter: u32,
 }
 
-#[derive(Debug, Clone, Copy)]
-enum Linkage {
-    External,
-    Internal,
-}
-
+// TODO: refactor, could maybe use the other scope object
 #[derive(Debug)]
 struct Scope {
     vars: HashMap<String, String>,
     defined: HashSet<String>,
     linkage: HashMap<String, Linkage>,
+    tentative: HashSet<String>,
 }
 
 impl Scope {
@@ -28,6 +24,7 @@ impl Scope {
             vars: HashMap::new(),
             defined: HashSet::new(),
             linkage: HashMap::new(),
+            tentative: HashSet::new(),
         }
     }
 
@@ -57,6 +54,14 @@ impl Scope {
 
     fn get_linkage(&self, name: &str) -> Option<Linkage> {
         self.linkage.get(name).copied()
+    }
+
+    fn add_tentative(&mut self, name: &str) {
+        self.tentative.insert(name.to_string());
+    }
+
+    fn remove_tentative(&mut self, name: &str) {
+        self.tentative.remove(name);
     }
 }
 
@@ -93,12 +98,16 @@ impl Env {
         self.scopes.iter().any(|scope| scope.is_defined(name))
     }
 
-    fn define(&mut self, name: String) {
-        self.scopes.last_mut().unwrap().define(name);
+    fn define(&mut self, name: &str) {
+        self.scopes.last_mut().unwrap().define(name.to_string());
     }
 
     fn get(&self, name: &str) -> Option<&String> {
         self.scopes.iter().rev().find_map(|scope| scope.get(name))
+    }
+
+    fn get_current_scope(&self, name: &str) -> Option<&String> {
+        self.scopes.last().unwrap().get(name)
     }
 
     fn in_global_context(&self) -> bool {
@@ -143,68 +152,231 @@ impl VariableResolver {
     }
 
     fn resolve_decl(&mut self, decl: &mut parser::Decl) -> Result<(), SemaError> {
+        let storage = decl.storage.clone();
+        let span = decl.span;
+
         match &mut decl.kind {
+            parser::DeclKind::VarDecl { name, initializer } if self.env.in_global_context() => {
+                self.resolve_global_var_decl(storage, span, name, initializer)?;
+            }
             parser::DeclKind::VarDecl { name, initializer } => {
-                if self.env.contains(name) {
-                    return Err(SemaError::DuplicateVariableDeclaration {
-                        var: name.to_string(),
-                        span: decl.span.into(),
-                    });
-                }
-
-                let new_name = self.make_tmp(name);
-                self.env
-                    .add(name.clone(), new_name.clone(), Linkage::Internal);
-                self.env.define(new_name.clone());
-
-                *name = new_name;
-                if let Some(initializer) = initializer {
-                    self.resolve_expr(initializer)?;
-                }
+                self.resolve_local_var_decl(storage, span, name, initializer)?;
             }
             parser::DeclKind::FunDecl {
                 name,
                 params: parameters,
                 body,
             } => {
-                if self.env.contains(name) {
-                    if self.env.is_defined(name) {
-                        return Err(SemaError::DuplicateVariableDeclaration {
-                            var: name.to_string(),
-                            span: decl.span.into(),
-                        });
-                    }
-                    if matches!(self.env.get_linkage(name), Some(Linkage::Internal)) {
-                        return Err(SemaError::InvalidRedefinition {
-                            name: name.to_string(),
-                            span: decl.span.into(),
-                        });
-                    }
-                }
-
-                let in_global_context = self.env.in_global_context();
-
-                self.env.add(name.clone(), name.clone(), Linkage::External);
-                if body.is_some() {
-                    self.env.define(name.clone());
-                }
-
-                self.env.push();
-                for param in parameters {
-                    self.resolve_param(param)?;
-                }
-                if let Some(body) = body {
-                    if !in_global_context {
-                        return Err(SemaError::InvalidFunctionDeclaration {
-                            func: name.to_string(),
-                            span: decl.span.into(),
-                        });
-                    }
-                    self.resolve_block(body)?;
-                }
-                self.env.pop();
+                self.resolve_fun_decl(storage, span, name, parameters, body)?;
             }
         }
+
+        Ok(())
+    }
+
+    fn resolve_global_var_decl(
+        &mut self,
+        storage: Option<parser::StorageClass>,
+        span: parser::Span,
+        name: &str,
+        initializer: &mut Option<parser::Expr>,
+    ) -> Result<(), SemaError> {
+        let linkage = match storage {
+            Some(parser::StorageClass::Static) => Linkage::Internal,
+            Some(parser::StorageClass::Extern) => Linkage::External,
+            None => Linkage::External,
+        };
+
+        if let Some(old_linkage) = self.env.get_linkage(name) {
+            // `extern` declarations inherit the linkage of the original declaration
+            if matches!(storage, Some(parser::StorageClass::Extern)) {
+                return Ok(());
+            }
+
+            if old_linkage != linkage {
+                return Err(SemaError::InvalidRedeclaration {
+                    name: name.to_string(),
+                    span: span.into(),
+                });
+            }
+
+            // Tentative definition
+            if initializer.is_none() && !matches!(storage, Some(parser::StorageClass::Extern)) {
+                self.env.scopes[0].add_tentative(name);
+                return Ok(());
+            }
+        } else {
+            self.env.add(name.to_string(), name.to_string(), linkage);
+        }
+
+        if let Some(initializer) = initializer {
+            self.env.define(name);
+            self.env.scopes[0].remove_tentative(name);
+            self.resolve_expr(initializer)?;
+        } else if !matches!(storage, Some(parser::StorageClass::Extern)) {
+            // Tentative definition
+            self.env.scopes[0].add_tentative(name);
+        }
+
+        Ok(())
+    }
+
+    fn resolve_local_var_decl(
+        &mut self,
+        storage: Option<parser::StorageClass>,
+        span: parser::Span,
+        name: &mut String,
+        initializer: &mut Option<parser::Expr>,
+    ) -> Result<(), SemaError> {
+        match storage {
+            Some(parser::StorageClass::Extern) => {
+                // For an `extern` declaration, check if it is already declared in the current scope
+                if let Some(existing_name) = self.env.get_current_scope(name) {
+                    let existing_linkage = self.env.get_linkage(existing_name);
+                    // There can be multiple `extern` declarations if they have linkage
+                    if matches!(
+                        existing_linkage,
+                        Some(Linkage::External | Linkage::Internal)
+                    ) {
+                        return Ok(());
+                    } else {
+                        return Err(SemaError::DuplicateVariableDeclaration {
+                            var: name.clone(),
+                            span: span.into(),
+                        });
+                    }
+                }
+
+                // No declaration was found in the current scope, look in the global scope
+                if let Some(existing_name) = self.env.scopes.first().unwrap().get(name) {
+                    let existing_linkage =
+                        self.env.scopes.first().unwrap().get_linkage(existing_name);
+                    if matches!(
+                        existing_linkage,
+                        Some(Linkage::External | Linkage::Internal)
+                    ) {
+                        self.env.add(
+                            name.clone(),
+                            existing_name.clone(),
+                            existing_linkage.unwrap(),
+                        );
+                    }
+                } else {
+                    self.env.add(name.clone(), name.clone(), Linkage::External);
+                }
+            }
+            Some(parser::StorageClass::Static) => {
+                if self.env.get_current_scope(name).is_some() {
+                    return Err(SemaError::DuplicateVariableDeclaration {
+                        var: name.clone(),
+                        span: span.into(),
+                    });
+                }
+
+                // Static local variable
+                let new_name = self.make_tmp(name);
+                self.env
+                    .add(name.clone(), new_name.clone(), Linkage::Internal);
+                *name = new_name.clone();
+
+                if let Some(initializer) = initializer {
+                    self.env.define(&new_name);
+                    self.resolve_expr(initializer)?;
+                }
+            }
+            None => {
+                if self.env.get_current_scope(name).is_some() {
+                    return Err(SemaError::DuplicateVariableDeclaration {
+                        var: name.clone(),
+                        span: span.into(),
+                    });
+                }
+
+                let new_name = self.make_tmp(name);
+                self.env.add(name.clone(), new_name.clone(), Linkage::None);
+                *name = new_name.clone();
+
+                if let Some(initializer) = initializer {
+                    self.env.define(&new_name);
+                    self.resolve_expr(initializer)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn resolve_fun_decl(
+        &mut self,
+        storage: Option<parser::StorageClass>,
+        span: parser::Span,
+        name: &mut String,
+        parameters: &mut Vec<parser::Param>,
+        body: &mut Option<parser::Block>,
+    ) -> Result<(), SemaError> {
+        let linkage = match storage {
+            Some(parser::StorageClass::Static) => Linkage::Internal,
+            Some(parser::StorageClass::Extern) => Linkage::External,
+            None => self.env.get_linkage(name).unwrap_or(Linkage::External),
+        };
+
+        if self.env.contains(name) {
+            let existing_linkage = self.env.get_linkage(name);
+
+            if !matches!(storage, Some(parser::StorageClass::Extern)) {
+                if let Some(existing_linkage) = existing_linkage
+                    && existing_linkage != linkage
+                {
+                    return Err(SemaError::InvalidRedeclaration {
+                        name: name.clone(),
+                        span: span.into(),
+                    });
+                }
+
+                // Function redefined as variable
+                if matches!(existing_linkage, Some(Linkage::None)) {
+                    return Err(SemaError::InvalidRedefinition {
+                        name: name.clone(),
+                        span: span.into(),
+                    });
+                }
+            }
+
+            if self.env.is_defined(name) && body.is_some() {
+                return Err(SemaError::DuplicateVariableDeclaration {
+                    var: name.clone(),
+                    span: span.into(),
+                });
+            }
+        } else {
+            self.env.add(name.clone(), name.clone(), linkage);
+        }
+
+        if body.is_some() {
+            if !self.env.in_global_context() {
+                return Err(SemaError::InvalidFunctionDeclaration {
+                    func: name.to_string(),
+                    span: span.into(),
+                });
+            }
+            self.env.define(name);
+        }
+
+        if !self.env.in_global_context() && matches!(storage, Some(parser::StorageClass::Static)) {
+            return Err(SemaError::InvalidFunctionDeclaration {
+                func: name.to_string(),
+                span: span.into(),
+            });
+        }
+
+        self.env.push();
+        for param in parameters {
+            self.resolve_param(param)?;
+        }
+        if let Some(body) = body {
+            self.resolve_block(body)?;
+        }
+        self.env.pop();
 
         Ok(())
     }
@@ -219,8 +391,8 @@ impl VariableResolver {
 
         let new_name = self.make_tmp(&param.name);
         self.env
-            .add(param.name.clone(), new_name.clone(), Linkage::Internal);
-        self.env.define(new_name.clone());
+            .add(param.name.clone(), new_name.clone(), Linkage::None);
+        self.env.define(&new_name);
         param.name = new_name.clone();
 
         Ok(())
@@ -289,6 +461,12 @@ impl VariableResolver {
             parser::ForInit::Decl(decl) => {
                 if matches!(&decl.kind, parser::DeclKind::FunDecl { .. }) {
                     return Err(SemaError::InvalidFunctionDefinition {
+                        span: decl.span.into(),
+                    });
+                }
+                // Storage classes are not allowed in for loop declarations
+                if decl.storage.is_some() {
+                    return Err(SemaError::InvalidStorageClassInForLoop {
                         span: decl.span.into(),
                     });
                 }

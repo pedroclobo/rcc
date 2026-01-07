@@ -3,7 +3,7 @@ mod error;
 
 pub use ast::{
     BinaryOperator, Block, BlockItem, Decl, DeclKind, Expr, ExprKind, ForInit, Label, Param,
-    Program, Span, Stmt, StmtKind, Type, UnaryOperator,
+    Program, Span, Stmt, StmtKind, StorageClass, Type, UnaryOperator,
 };
 pub use error::ParserError;
 
@@ -201,16 +201,21 @@ impl<'a> Parser<'a> {
     // <body_item> ::= <stmt> | <decl>
     fn parse_body_item(&mut self) -> Result<BlockItem, ParserError> {
         match self.peek()?.kind {
-            TokenKind::Int => Ok(BlockItem::Decl(self.parse_decl()?)),
+            TokenKind::Int | TokenKind::Static | TokenKind::Extern => {
+                Ok(BlockItem::Decl(self.parse_decl()?))
+            }
             _ => Ok(BlockItem::Stmt(self.parse_stmt()?)),
         }
     }
 
-    // <decl>     ::= <var_decl> | <fun_decl>
-    // <var_decl> ::= "int" <identifier> [ "=" <exp> ] ";"
-    // <fun_decl> ::= "int" <identifier> "(" <param-list> ")" ( "{" { <block> } "}" | ";" )
+    // <decl>      ::= <var_decl> | <fun_decl>
+    // <var_decl>  ::= { <specifier> }+ <identifier> [ "=" <exp> ] ";"
+    // <fun_decl>  ::= { <specifier> }+ <identifier> "(" <param-list> ")" ( "{" { <block> } "}" | ";" )
+    // <specifier> ::= "static" | "extern" | "int"
     fn parse_decl(&mut self) -> Result<Decl, ParserError> {
-        let start = self.expect(TokenKind::Int)?.span.start;
+        let start = self.peek()?.span.start;
+
+        let (_, storage) = self.parse_specifiers()?;
         let id = self.expect(TokenKind::Identifier)?;
         let name = id.lexeme.to_string();
 
@@ -226,6 +231,7 @@ impl<'a> Parser<'a> {
                         name,
                         initializer: Some(initializer),
                     },
+                    storage,
                     span: Span::new(start, end),
                 })
             }
@@ -248,6 +254,7 @@ impl<'a> Parser<'a> {
                         body,
                         params,
                     },
+                    storage,
                     span: Span::new(start, end),
                 })
             }
@@ -258,10 +265,44 @@ impl<'a> Parser<'a> {
                         name,
                         initializer: None,
                     },
+                    storage,
                     span: Span::new(start, id.span.end),
                 })
             }
         }
+    }
+
+    fn parse_specifiers(&mut self) -> Result<(Type, Option<StorageClass>), ParserError> {
+        let mut tys = Vec::new();
+        let mut storage_classes = Vec::new();
+
+        loop {
+            match self.peek()?.kind {
+                TokenKind::Int => {
+                    self.next()?;
+                    tys.push(Type::Int);
+                }
+                TokenKind::Static => {
+                    self.next()?;
+                    storage_classes.push(StorageClass::Static);
+                }
+                TokenKind::Extern => {
+                    self.next()?;
+                    storage_classes.push(StorageClass::Extern);
+                }
+                _ => break,
+            }
+        }
+
+        if tys.len() != 1 {
+            // TODO: error
+            panic!("Multiple types/no type specified");
+        } else if storage_classes.len() > 1 {
+            // TODO: error
+            panic!("Multiple storage classes specified");
+        }
+
+        Ok((tys[0].clone(), storage_classes.pop()))
     }
 
     // <param-list> ::= "void" | "int" <identifier> { "," "int" <identifier> }
@@ -591,7 +632,9 @@ impl<'a> Parser<'a> {
     // <for-init> ::= <declaration> | [ <exp> ] ";"
     fn parse_for_init(&mut self) -> Result<ForInit, ParserError> {
         match self.peek()?.kind {
-            TokenKind::Int => Ok(ForInit::Decl(self.parse_decl()?)),
+            TokenKind::Int | TokenKind::Static | TokenKind::Extern => {
+                Ok(ForInit::Decl(self.parse_decl()?))
+            }
             TokenKind::Semicolon => {
                 self.expect(TokenKind::Semicolon)?;
                 Ok(ForInit::Expr(None))
@@ -1037,6 +1080,7 @@ mod tests {
                     initializer: None,
                 },
                 span: dummy_span!(),
+                storage: None,
             }
         };
         ($name:expr, $init:expr) => {
@@ -1046,6 +1090,53 @@ mod tests {
                     initializer: Some($init),
                 },
                 span: dummy_span!(),
+                storage: None,
+            }
+        };
+    }
+
+    macro_rules! static_var_decl {
+        ($name:expr) => {
+            Decl {
+                kind: DeclKind::VarDecl {
+                    name: $name.to_string(),
+                    initializer: None,
+                },
+                span: dummy_span!(),
+                storage: Some(StorageClass::Static),
+            }
+        };
+        ($name:expr, $init:expr) => {
+            Decl {
+                kind: DeclKind::VarDecl {
+                    name: $name.to_string(),
+                    initializer: Some($init),
+                },
+                span: dummy_span!(),
+                storage: Some(StorageClass::Static),
+            }
+        };
+    }
+
+    macro_rules! extern_var_decl {
+        ($name:expr) => {
+            Decl {
+                kind: DeclKind::VarDecl {
+                    name: $name.to_string(),
+                    initializer: None,
+                },
+                span: dummy_span!(),
+                storage: Some(StorageClass::Extern),
+            }
+        };
+        ($name:expr, $init:expr) => {
+            Decl {
+                kind: DeclKind::VarDecl {
+                    name: $name.to_string(),
+                    initializer: Some($init),
+                },
+                span: dummy_span!(),
+                storage: Some(StorageClass::Extern),
             }
         };
     }
@@ -1059,6 +1150,7 @@ mod tests {
                     body: None,
                 },
                 span: dummy_span!(),
+                storage: None,
             }
         };
         ($name:expr, $params:expr, $body:expr) => {
@@ -1069,6 +1161,57 @@ mod tests {
                     body: Some($body),
                 },
                 span: dummy_span!(),
+                storage: None,
+            }
+        };
+    }
+
+    macro_rules! static_fun_decl {
+        ($name:expr, $params:expr) => {
+            Decl {
+                kind: DeclKind::FunDecl {
+                    name: $name.to_string(),
+                    params: $params,
+                    body: None,
+                },
+                span: dummy_span!(),
+                storage: Some(StorageClass::Static),
+            }
+        };
+        ($name:expr, $params:expr, $body:expr) => {
+            Decl {
+                kind: DeclKind::FunDecl {
+                    name: $name.to_string(),
+                    params: $params,
+                    body: Some($body),
+                },
+                span: dummy_span!(),
+                storage: Some(StorageClass::Static),
+            }
+        };
+    }
+
+    macro_rules! extern_fun_decl {
+        ($name:expr, $params:expr) => {
+            Decl {
+                kind: DeclKind::FunDecl {
+                    name: $name.to_string(),
+                    params: $params,
+                    body: None,
+                },
+                span: dummy_span!(),
+                storage: Some(StorageClass::Extern),
+            }
+        };
+        ($name:expr, $params:expr, $body:expr) => {
+            Decl {
+                kind: DeclKind::FunDecl {
+                    name: $name.to_string(),
+                    params: $params,
+                    body: Some($body),
+                },
+                span: dummy_span!(),
+                storage: Some(StorageClass::Extern),
             }
         };
     }
@@ -1661,6 +1804,89 @@ mod tests {
         assert_eq!(
             expr,
             fun_call!(var!("x"), vec![constant!(1), constant!(2), constant!(3)])
+        );
+    }
+
+    #[test]
+    fn static_var_decl() {
+        let mut parser = Parser::new("static int x = 42;");
+        let decl = parser.parse_decl().unwrap();
+        assert!(parser.lexer.next().is_none());
+
+        assert_eq!(decl, static_var_decl!("x", constant!(42)));
+    }
+
+    #[test]
+    fn static_fun_decl() {
+        let mut parser = Parser::new("static int foo(void) { return 0; }");
+        let decl = parser.parse_decl().unwrap();
+        assert!(parser.lexer.next().is_none());
+
+        assert_eq!(
+            decl,
+            static_fun_decl!(
+                "foo",
+                vec![],
+                block![BlockItem::Stmt(return_stmt!(constant!(0)))]
+            )
+        );
+    }
+
+    #[test]
+    fn extern_var_decl() {
+        let mut parser = Parser::new("extern int x = 42;");
+        let decl = parser.parse_decl().unwrap();
+        assert!(parser.lexer.next().is_none());
+
+        assert_eq!(decl, extern_var_decl!("x", constant!(42)));
+    }
+
+    #[test]
+    fn extern_fun_decl() {
+        let mut parser = Parser::new("extern int scanf(int format, int arg);");
+        let decl = parser.parse_decl().unwrap();
+        assert!(parser.lexer.next().is_none());
+
+        assert_eq!(
+            decl,
+            extern_fun_decl!(
+                "scanf",
+                vec![param!("format", Type::Int), param!("arg", Type::Int)]
+            )
+        );
+    }
+
+    #[test]
+    fn for_loop_with_static_decl() {
+        let mut parser = Parser::new("for (static int i = 0; i < 10; i++) break;");
+        let stmt = parser.parse_stmt().unwrap();
+        assert!(parser.lexer.next().is_none());
+
+        assert_eq!(
+            stmt,
+            for_stmt!(
+                ForInit::Decl(static_var_decl!("i", constant!(0))),
+                Some(binary!(BinaryOperator::Lt, var!("i"), constant!(10))),
+                Some(unary!(UnaryOperator::PostInc, var!("i"))),
+                break_stmt!()
+            )
+        );
+    }
+
+    #[test]
+    fn for_loop_with_extern_decl() {
+        let mut parser = Parser::new("for (extern int counter; counter > 0; counter--) continue;");
+        let stmt = parser.parse_stmt().unwrap();
+        assert!(parser.lexer.next().is_none());
+
+        assert_eq!(
+            stmt,
+            for_stmt!(
+                ForInit::Decl(extern_var_decl!("counter")),
+                Some(binary!(BinaryOperator::Gt, var!("counter"), constant!(0))),
+                Some(unary!(UnaryOperator::PostDec, var!("counter"))),
+                continue_stmt!()
+            )
         );
     }
 }

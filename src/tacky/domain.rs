@@ -1,17 +1,36 @@
 use super::TackyError;
-use crate::parser;
+use crate::{parser, sema};
 
 #[derive(Debug)]
 pub struct Program<'a> {
-    pub functions: Vec<FunctionDefinition<'a>>,
+    pub decls: Vec<Decl<'a>>,
+    pub globals: Vec<StaticVariable>,
 }
 
 impl std::fmt::Display for Program<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for function in &self.functions {
-            writeln!(f, "{}", function)?;
+        for global in &self.globals {
+            writeln!(f, "{}", global)?;
+        }
+        for decl in &self.decls {
+            writeln!(f, "{}", decl)?;
         }
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub enum Decl<'a> {
+    Function(FunctionDefinition<'a>),
+    Static(StaticVariable),
+}
+
+impl std::fmt::Display for Decl<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Decl::Function(func) => writeln!(f, "{}", func),
+            Decl::Static(var) => writeln!(f, "{}", var),
+        }
     }
 }
 
@@ -20,6 +39,7 @@ pub struct FunctionDefinition<'a> {
     pub name: &'a str,
     pub params: Vec<String>,
     pub body: Vec<Instruction>,
+    pub is_global: bool,
 }
 
 impl std::fmt::Display for FunctionDefinition<'_> {
@@ -32,6 +52,21 @@ impl std::fmt::Display for FunctionDefinition<'_> {
             }
         }
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct StaticVariable {
+    pub name: String,
+    pub value: i32,
+    pub linkage: sema::Linkage,
+    pub is_tentative: bool,
+}
+
+impl std::fmt::Display for StaticVariable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // TODO: better printing
+        writeln!(f, "static {} = {}", self.name, self.value)
     }
 }
 

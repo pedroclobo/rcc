@@ -1,14 +1,19 @@
 use super::X86EmitterError;
-use crate::tacky;
+use crate::{sema, tacky};
 
 #[derive(Debug)]
 pub struct Program<'a> {
     pub functions: Vec<FunctionDefinition<'a>>,
+    pub globals: Vec<StaticVariable>,
 }
 
 impl std::fmt::Display for Program<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, ".intel_syntax noprefix")?;
+        for global in &self.globals {
+            writeln!(f, "{}", global)?;
+        }
+        writeln!(f, "\t.text")?;
         for function in &self.functions {
             writeln!(f, "{}", function)?;
         }
@@ -19,9 +24,38 @@ impl std::fmt::Display for Program<'_> {
 }
 
 #[derive(Debug)]
+pub struct StaticVariable {
+    pub name: String,
+    pub value: i32,
+    pub linkage: sema::Linkage,
+}
+
+impl std::fmt::Display for StaticVariable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if matches!(self.linkage, sema::Linkage::External) {
+            writeln!(f, "\t.globl {}", self.name)?;
+        }
+        if self.value != 0 {
+            writeln!(f, "\t.data")?;
+            writeln!(f, "\t.align 4")?;
+            writeln!(f, "{}:", self.name)?;
+            writeln!(f, "\t.long {}", self.value)?;
+        } else {
+            writeln!(f, "\t.bss")?;
+            writeln!(f, "\t.align 4")?;
+            writeln!(f, "{}:", self.name)?;
+            writeln!(f, "\t.zero 4")?;
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
 pub struct FunctionDefinition<'a> {
     pub name: &'a str,
     pub body: Vec<Instruction>,
+    pub linkage: sema::Linkage,
 }
 
 impl FunctionDefinition<'_> {
@@ -32,7 +66,9 @@ impl FunctionDefinition<'_> {
 
 impl std::fmt::Display for FunctionDefinition<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "\t.globl {}", self.name)?;
+        if matches!(self.linkage, sema::Linkage::External) {
+            writeln!(f, "\t.globl {}", self.name)?;
+        }
         writeln!(f, "{}:", self.name)?;
         for instr in &self.body {
             match instr {
@@ -275,6 +311,7 @@ pub enum Operand {
     Reg(Register),
     PseudoReg(String),
     Stack { size: i32, offset: i32 },
+    Data(String),
 }
 
 impl From<tacky::Value> for Operand {
@@ -310,6 +347,7 @@ impl std::fmt::Display for Operand {
                     }
                 )
             }
+            Operand::Data(name) => write!(f, "dword ptr \"{}\"[rip]", name),
         }
     }
 }

@@ -95,9 +95,16 @@ impl PartialEq for BlockItem {
 impl Eq for BlockItem {}
 
 #[derive(Debug, Clone)]
+pub enum StorageClass {
+    Static,
+    Extern,
+}
+
+#[derive(Debug, Clone)]
 pub struct Decl {
     pub kind: DeclKind,
     pub span: Span,
+    pub storage: Option<StorageClass>,
 }
 
 impl PartialEq for Decl {

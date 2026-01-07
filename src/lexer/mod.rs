@@ -448,6 +448,16 @@ impl<'a> Iterator for Lexer<'a> {
                     "default",
                     Span::new(start, self.idx),
                 )),
+                "static" => Ok(Token::new(
+                    TokenKind::Static,
+                    "static",
+                    Span::new(start, self.idx),
+                )),
+                "extern" => Ok(Token::new(
+                    TokenKind::Extern,
+                    "extern",
+                    Span::new(start, self.idx),
+                )),
                 id => Ok(Token::new(
                     TokenKind::Identifier,
                     id,
@@ -660,5 +670,16 @@ mod tests {
     #[test]
     fn comma() {
         assert_eq!(lex(",").unwrap(), vec![tok(TokenKind::Comma, ","),]);
+    }
+
+    #[test]
+    fn static_extern() {
+        assert_eq!(
+            lex("static extern").unwrap(),
+            vec![
+                tok(TokenKind::Static, "static"),
+                tok(TokenKind::Extern, "extern")
+            ]
+        );
     }
 }

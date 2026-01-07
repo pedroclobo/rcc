@@ -1,39 +1,31 @@
 use super::{
     BinaryOperator, ConditionCode, FunctionDefinition, Instruction, InstructionFixer, Operand,
-    Program, Register, X86EmitterError,
+    Program, Register, StaticVariable, X86EmitterError,
 };
-use crate::tacky;
+use crate::{sema, tacky};
 
 pub struct X86Emitter<'a> {
     program: Option<Program<'a>>,
     function: Option<FunctionDefinition<'a>>,
 
-    functions: Vec<String>,
-
     instructions: Vec<Instruction>,
-}
-
-impl Default for X86Emitter<'_> {
-    fn default() -> Self {
-        Self::new()
-    }
+    sema: &'a sema::Sema,
 }
 
 impl<'a> X86Emitter<'a> {
-    pub fn new() -> Self {
+    pub fn new(sema: &'a sema::Sema) -> Self {
         X86Emitter {
             program: None,
             function: None,
 
-            functions: Vec::new(),
-
             instructions: Vec::new(),
+            sema,
         }
     }
 
     pub fn get_program(&mut self) -> Option<Program<'_>> {
         if let Some(mut prog) = self.program.take() {
-            let mut instruction_fixer = InstructionFixer::new();
+            let mut instruction_fixer = InstructionFixer::new(self.sema);
             instruction_fixer.run(&mut prog);
             Some(prog)
         } else {
@@ -44,18 +36,25 @@ impl<'a> X86Emitter<'a> {
     pub fn visit_program(&mut self, program: tacky::Program<'a>) -> Result<(), X86EmitterError> {
         let mut functions = Vec::new();
 
-        for function in program.functions {
-            self.visit_function_definition(function)?;
-            if let Some(function) = self.function.take() {
-                // TODO: `self.function` holds the names of functions defined in
-                // the same translation unit. This is only needed to know when to
-                // call `f` vs `f@PLT`.
-                self.functions.push(function.name.to_string());
-                functions.push(function);
+        for decl in program.decls {
+            if let tacky::Decl::Function(decl) = decl {
+                self.visit_function_definition(decl)?;
+                if let Some(function) = self.function.take() {
+                    functions.push(function);
+                }
             }
         }
 
-        self.program = Some(Program { functions });
+        let mut globals = Vec::new();
+        for global in program.globals {
+            globals.push(StaticVariable {
+                name: global.name.to_string(),
+                linkage: global.linkage,
+                value: global.value,
+            });
+        }
+
+        self.program = Some(Program { functions, globals });
 
         Ok(())
     }
@@ -88,6 +87,11 @@ impl<'a> X86Emitter<'a> {
         self.function = Some(FunctionDefinition {
             name: function_definition.name,
             body: self.instructions.drain(..).collect(),
+            linkage: self
+                .sema
+                .symtab
+                .get_linkage(function_definition.name)
+                .unwrap_or(sema::Linkage::External),
         });
 
         Ok(())
@@ -224,7 +228,7 @@ impl<'a> X86Emitter<'a> {
                         Operand::Imm(_) | Operand::Reg(_) => {
                             instructions.push(Instruction::Push(arg.clone()));
                         }
-                        Operand::PseudoReg(_) | Operand::Stack { .. } => {
+                        Operand::PseudoReg(_) | Operand::Stack { .. } | Operand::Data(_) => {
                             instructions
                                 .push(Instruction::Mov(arg.clone(), Operand::Reg(Register::Eax)));
                             instructions.push(Instruction::Push(Operand::Reg(Register::Rax)));
@@ -232,11 +236,12 @@ impl<'a> X86Emitter<'a> {
                     }
                 }
 
-                if self.functions.contains(&func) {
-                    instructions.push(Instruction::Call(func));
-                } else {
-                    instructions.push(Instruction::Call(format!("{}@PLT", func)));
-                }
+                let sym = self.sema.symtab.get(&func).expect("undeclared function");
+                instructions.push(match sym.linkage {
+                    sema::Linkage::Internal => Instruction::Call(format!("{}@PLT", func)),
+                    sema::Linkage::External => Instruction::Call(func),
+                    sema::Linkage::None => panic!("function with no linkage"),
+                });
 
                 instructions.extend(vec![
                     Instruction::Binary(

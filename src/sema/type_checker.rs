@@ -1,66 +1,142 @@
 use std::collections::HashMap;
 
+use super::Linkage;
 use crate::parser;
 
 use super::SemaError;
 
 #[derive(Debug)]
-struct Scope {
-    types: HashMap<String, parser::Type>,
+pub struct Scope {
+    syms: HashMap<String, Symbol>,
+}
+
+// TODO: host
+#[derive(Debug)]
+pub struct Symbol {
+    pub ty: parser::Type,
+    pub linkage: Linkage,
+    pub init: InitValue,
+}
+
+// TODO: host
+#[derive(Debug, Clone, Copy)]
+pub enum InitValue {
+    Local,
+    None,
+    Tentative,
+    Const(i32),
+    Fun,
 }
 
 impl Scope {
     fn new() -> Self {
         Scope {
-            types: HashMap::new(),
+            syms: HashMap::new(),
         }
     }
 
-    fn add(&mut self, name: String, ty: parser::Type) {
-        self.types.insert(name, ty);
+    fn add(&mut self, name: &str, ty: parser::Type, linkage: Linkage, init: InitValue) {
+        self.syms
+            .insert(name.to_string(), Symbol { ty, linkage, init });
     }
 
-    fn get(&self, name: &str) -> Option<&parser::Type> {
-        self.types.get(name)
+    fn get_ty(&self, name: &str) -> Option<&parser::Type> {
+        self.syms.get(name).map(|sym| &sym.ty)
+    }
+
+    fn get_symbol(&self, name: &str) -> Option<&Symbol> {
+        self.syms.get(name)
+    }
+
+    fn get_linkage(&self, name: &str) -> Option<Linkage> {
+        self.syms.get(name).map(|sym| sym.linkage)
+    }
+
+    fn get_init(&self, name: &str) -> Option<InitValue> {
+        self.syms.get(name).map(|sym| &sym.init).copied()
+    }
+
+    fn symbols(&self) -> impl Iterator<Item = (&String, &Symbol)> {
+        self.syms.iter()
     }
 }
 
 #[derive(Debug)]
-struct SymbolTable {
-    scopes: Vec<Scope>,
+pub struct SymbolTable {
+    syms: Vec<Scope>,
+}
+
+impl Default for SymbolTable {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SymbolTable {
-    fn new() -> Self {
+    pub fn new() -> Self {
         SymbolTable {
-            scopes: vec![Scope::new()],
+            syms: vec![Scope::new()],
         }
     }
 
-    fn push(&mut self) {
-        self.scopes.push(Scope::new());
+    pub fn push(&mut self) {
+        self.syms.push(Scope::new());
     }
 
-    fn pop(&mut self) {
-        self.scopes.pop();
+    pub fn pop(&mut self) {
+        self.syms.pop();
     }
 
-    fn add(&mut self, name: String, ty: parser::Type) {
-        self.scopes.last_mut().unwrap().add(name, ty);
+    pub fn add_local(&mut self, name: &str, ty: parser::Type) {
+        self.syms
+            .last_mut()
+            .unwrap()
+            .add(name, ty, Linkage::None, InitValue::Local);
     }
 
-    fn get(&self, name: &str) -> Option<&parser::Type> {
-        self.scopes.iter().rev().find_map(|scope| scope.get(name))
+    pub fn get_local_ty(&self, name: &str) -> Option<&parser::Type> {
+        self.syms.iter().rev().find_map(|scope| scope.get_ty(name))
+    }
+
+    pub fn add_global(&mut self, name: &str, ty: parser::Type, linkage: Linkage, init: InitValue) {
+        self.syms.first_mut().unwrap().add(name, ty, linkage, init);
+    }
+
+    pub fn get_global_ty(&self, name: &str) -> Option<&parser::Type> {
+        self.syms.first().unwrap().get_ty(name)
+    }
+
+    pub fn get(&self, name: &str) -> Option<&Symbol> {
+        self.syms
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get_symbol(name))
+    }
+
+    pub fn get_linkage(&self, name: &str) -> Option<Linkage> {
+        self.syms.first().unwrap().get_linkage(name)
+    }
+
+    pub fn get_init(&self, name: &str) -> Option<InitValue> {
+        self.syms.first().unwrap().get_init(name)
+    }
+
+    pub fn symbols(&self) -> impl Iterator<Item = (&String, &Symbol)> {
+        self.syms.iter().flat_map(|scope| scope.symbols())
+    }
+
+    pub fn is_global_scope(&self) -> bool {
+        self.syms.len() == 1
     }
 }
 
-pub struct TypeChecker {
-    symtab: SymbolTable,
+pub struct TypeChecker<'a> {
+    symtab: &'a mut SymbolTable,
 }
 
-impl TypeChecker {
-    pub fn new() -> Self {
-        TypeChecker::default()
+impl<'a> TypeChecker<'a> {
+    pub fn new(symtab: &'a mut SymbolTable) -> Self {
+        TypeChecker { symtab }
     }
 
     pub fn run(&mut self, program: &parser::Program) -> Result<(), SemaError> {
@@ -72,19 +148,129 @@ impl TypeChecker {
 
     fn check_decl(&mut self, decl: &parser::Decl) -> Result<(), SemaError> {
         match &decl.kind {
-            parser::DeclKind::VarDecl { name, initializer } => {
-                self.symtab.add(name.clone(), parser::Type::Int);
-                if let Some(initializer) = initializer {
-                    self.check_expr(initializer)?;
+            parser::DeclKind::VarDecl { name, initializer } if self.symtab.is_global_scope() => {
+                if let Some(ty) = self.symtab.get_global_ty(name)
+                    && !matches!(ty, parser::Type::Int)
+                {
+                    return Err(SemaError::InvalidRedeclaration {
+                        name: name.clone(),
+                        span: decl.span.into(),
+                    });
                 }
+
+                let mut linkage = match decl.storage {
+                    Some(parser::StorageClass::Static) => Linkage::Internal,
+                    _ => Linkage::External,
+                };
+                let mut initial_value = match initializer {
+                    None => match decl.storage {
+                        Some(parser::StorageClass::Extern) => InitValue::None,
+                        _ => InitValue::Tentative,
+                    },
+                    Some(parser::Expr {
+                        kind: parser::ExprKind::Constant(i),
+                        ..
+                    }) => InitValue::Const(*i),
+                    Some(expr) => {
+                        return Err(SemaError::InvalidInitializer {
+                            span: expr.span.into(),
+                        });
+                    }
+                };
+
+                if let (Some(old_linkage), Some(old_init_value)) =
+                    (self.symtab.get_linkage(name), self.symtab.get_init(name))
+                {
+                    // `extern` declarations inherit the linkage of the previous declaration
+                    if matches!(decl.storage, Some(parser::StorageClass::Extern)) {
+                        linkage = old_linkage;
+                        if initializer.is_some() {
+                            return Err(SemaError::InvalidRedeclaration {
+                                name: name.clone(),
+                                span: decl.span.into(),
+                            });
+                        }
+                    // Non-`extern` declarations must agree on the linkage
+                    } else if old_linkage != linkage {
+                        return Err(SemaError::InvalidRedeclaration {
+                            name: name.clone(),
+                            span: decl.span.into(),
+                        });
+                    }
+
+                    initial_value = match (old_init_value, initial_value) {
+                        (InitValue::Tentative, InitValue::Tentative | InitValue::None) => {
+                            InitValue::Tentative
+                        }
+                        (InitValue::Const(_), InitValue::Const(_)) => {
+                            return Err(SemaError::DuplicateVariableDeclaration {
+                                var: name.clone(),
+                                span: decl.span.into(),
+                            });
+                        }
+                        (InitValue::Const(i), _) => InitValue::Const(i),
+                        _ => initial_value,
+                    };
+                }
+
+                self.symtab
+                    .add_global(name, parser::Type::Int, linkage, initial_value);
             }
+            parser::DeclKind::VarDecl { name, initializer } => match decl.storage {
+                Some(parser::StorageClass::Extern) => {
+                    if initializer.is_some() {
+                        return Err(SemaError::InvalidRedeclaration {
+                            name: name.clone(),
+                            span: decl.span.into(),
+                        });
+                    }
+
+                    if let Some(ty) = self.symtab.get_global_ty(name) {
+                        if ty != &parser::Type::Int {
+                            return Err(SemaError::InvalidRedeclaration {
+                                name: name.clone(),
+                                span: decl.span.into(),
+                            });
+                        }
+                    } else {
+                        self.symtab.add_global(
+                            name,
+                            parser::Type::Int,
+                            Linkage::External,
+                            InitValue::None,
+                        );
+                    }
+                }
+                Some(parser::StorageClass::Static) => {
+                    let init = match initializer {
+                        Some(parser::Expr {
+                            kind: parser::ExprKind::Constant(i),
+                            ..
+                        }) => InitValue::Const(*i),
+                        None => InitValue::None,
+                        _ => {
+                            return Err(SemaError::InvalidInitializer {
+                                span: initializer.as_ref().unwrap().span.into(),
+                            });
+                        }
+                    };
+                    self.symtab
+                        .add_global(name, parser::Type::Int, Linkage::Internal, init);
+                }
+                None => {
+                    self.symtab.add_local(name, parser::Type::Int);
+                    if let Some(initializer) = initializer {
+                        self.check_expr(initializer)?;
+                    }
+                }
+            },
             parser::DeclKind::FunDecl { name, params, body } => {
                 let ty = parser::Type::FunType {
                     ret: Box::new(parser::Type::Int),
                     params: vec![parser::Type::Int; params.len()],
                 };
 
-                if let Some(ety) = self.symtab.get(name)
+                if let Some(ety) = self.symtab.get_local_ty(name)
                     && ety != &ty
                 {
                     return Err(SemaError::InvalidRedeclaration {
@@ -93,10 +279,52 @@ impl TypeChecker {
                     });
                 }
 
-                self.symtab.add(name.clone(), ty);
+                let linkage = match decl.storage {
+                    Some(parser::StorageClass::Static) => Linkage::Internal,
+                    Some(parser::StorageClass::Extern) => Linkage::External,
+                    None => self.symtab.get_linkage(name).unwrap_or(Linkage::External),
+                };
+
+                let (linkage, init) = if let (Some(old_linkage), Some(old_init)) =
+                    (self.symtab.get_linkage(name), self.symtab.get_init(name))
+                {
+                    // `extern` declarations inherit the old declaration's linkage
+                    let linkage = match decl.storage {
+                        Some(parser::StorageClass::Extern) => old_linkage,
+                        _ => {
+                            if old_linkage != linkage {
+                                return Err(SemaError::InvalidRedeclaration {
+                                    name: name.clone(),
+                                    span: decl.span.into(),
+                                });
+                            }
+                            linkage
+                        }
+                    };
+                    (
+                        linkage,
+                        match (old_init, body.is_some()) {
+                            (InitValue::Fun, _) => InitValue::Fun,
+                            (InitValue::None, true) => InitValue::Fun,
+                            (InitValue::None, false) => InitValue::None,
+                            (_, _) => panic!("Invalid initializer for function"),
+                        },
+                    )
+                } else {
+                    (
+                        linkage,
+                        if body.is_some() {
+                            InitValue::Fun
+                        } else {
+                            InitValue::None
+                        },
+                    )
+                };
+
+                self.symtab.add_global(name, ty, linkage, init);
                 self.symtab.push();
                 for param in params {
-                    self.symtab.add(param.name.clone(), parser::Type::Int);
+                    self.symtab.add_local(&param.name, parser::Type::Int);
                 }
                 if let Some(body) = body {
                     self.check_block(body)?;
@@ -111,7 +339,11 @@ impl TypeChecker {
     fn check_expr(&mut self, expr: &parser::Expr) -> Result<parser::Type, SemaError> {
         match &expr.kind {
             parser::ExprKind::Constant(_) => Ok(parser::Type::Int),
-            parser::ExprKind::Var(v) => Ok(self.symtab.get(v).expect("undefined variable").clone()),
+            parser::ExprKind::Var(v) => Ok(self
+                .symtab
+                .get_local_ty(v)
+                .expect("undefined variable")
+                .clone()),
             parser::ExprKind::Unary(_, expr) => {
                 let ty = self.check_expr(expr)?;
                 if matches!(ty, parser::Type::FunType { .. }) {
@@ -165,7 +397,7 @@ impl TypeChecker {
 
                 match &identifier.kind {
                     parser::ExprKind::Var(v) => {
-                        let ty = self.symtab.get(v).expect("function not found");
+                        let ty = self.symtab.get_local_ty(v).expect("function not found");
                         if let parser::Type::FunType { params, .. } = ty {
                             if params.len() != arg_tys.len() {
                                 return Err(SemaError::FunctionArgumentCountMismatch {
@@ -193,7 +425,12 @@ impl TypeChecker {
                             });
                         }
                     }
-                    _ => panic!("invalid function call"),
+                    _ => {
+                        return Err(SemaError::InvalidFunctionCallable {
+                            name: "unknown".to_string(),
+                            span: identifier.span.into(),
+                        });
+                    }
                 };
 
                 Ok(parser::Type::Int)
@@ -293,13 +530,5 @@ impl TypeChecker {
         };
 
         Ok(())
-    }
-}
-
-impl Default for TypeChecker {
-    fn default() -> Self {
-        TypeChecker {
-            symtab: SymbolTable::new(),
-        }
     }
 }

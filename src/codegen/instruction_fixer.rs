@@ -1,29 +1,25 @@
 use std::collections::HashMap;
 
-use crate::codegen::FunctionDefinition;
+use crate::{codegen::FunctionDefinition, sema};
 
 use super::{BinaryOperator, Instruction, Operand, Program, PseudoRegisterReplacer, Register};
 
-pub struct InstructionFixer {
+pub struct InstructionFixer<'a> {
     instructions: HashMap<String, Vec<Instruction>>,
+    sema: &'a sema::Sema,
 }
 
-impl Default for InstructionFixer {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl InstructionFixer {
-    pub fn new() -> Self {
+impl<'a> InstructionFixer<'a> {
+    pub fn new(sema: &'a sema::Sema) -> Self {
         Self {
             instructions: HashMap::new(),
+            sema,
         }
     }
 
     pub fn run(&mut self, program: &mut Program<'_>) {
         for function in &mut program.functions {
-            let mut replacer = PseudoRegisterReplacer::new();
+            let mut replacer = PseudoRegisterReplacer::new(self.sema);
             replacer.run(function);
             self.collect_instructions(function, -replacer.get_offset());
             self.assign_instructions(function);
@@ -51,6 +47,42 @@ impl InstructionFixer {
 
         for instruction in &function.body {
             instructions.extend(match instruction {
+                Instruction::Mov(
+                    Operand::Data(name),
+                    Operand::Stack {
+                        size: dst_size,
+                        offset: dst_offset,
+                    },
+                ) => {
+                    vec![
+                        Instruction::Mov(Operand::Data(name.clone()), Operand::Reg(Register::R10d)),
+                        Instruction::Mov(
+                            Operand::Reg(Register::R10d),
+                            Operand::Stack {
+                                size: *dst_size,
+                                offset: *dst_offset,
+                            },
+                        ),
+                    ]
+                }
+                Instruction::Mov(
+                    Operand::Stack {
+                        size: dst_size,
+                        offset: dst_offset,
+                    },
+                    Operand::Data(name),
+                ) => {
+                    vec![
+                        Instruction::Mov(
+                            Operand::Stack {
+                                size: *dst_size,
+                                offset: *dst_offset,
+                            },
+                            Operand::Reg(Register::R10d),
+                        ),
+                        Instruction::Mov(Operand::Reg(Register::R10d), Operand::Data(name.clone())),
+                    ]
+                }
                 Instruction::Mov(
                     Operand::Stack {
                         size: src_size,
@@ -113,6 +145,54 @@ impl InstructionFixer {
                         ),
                     ]
                 }
+                Instruction::Cmp(Operand::Data(name_src), Operand::Data(name_dst)) => {
+                    vec![
+                        Instruction::Mov(
+                            Operand::Data(name_src.clone()),
+                            Operand::Reg(Register::R10d),
+                        ),
+                        Instruction::Cmp(
+                            Operand::Reg(Register::R10d),
+                            Operand::Data(name_dst.clone()),
+                        ),
+                    ]
+                }
+                Instruction::Cmp(
+                    Operand::Data(name),
+                    Operand::Stack {
+                        size: dst_size,
+                        offset: dst_offset,
+                    },
+                ) => {
+                    vec![
+                        Instruction::Mov(Operand::Data(name.clone()), Operand::Reg(Register::R10d)),
+                        Instruction::Cmp(
+                            Operand::Reg(Register::R10d),
+                            Operand::Stack {
+                                size: *dst_size,
+                                offset: *dst_offset,
+                            },
+                        ),
+                    ]
+                }
+                Instruction::Cmp(
+                    Operand::Stack {
+                        size: src_size,
+                        offset: src_offset,
+                    },
+                    Operand::Data(name),
+                ) => {
+                    vec![
+                        Instruction::Mov(
+                            Operand::Stack {
+                                size: *src_size,
+                                offset: *src_offset,
+                            },
+                            Operand::Reg(Register::R10d),
+                        ),
+                        Instruction::Cmp(Operand::Reg(Register::R10d), Operand::Data(name.clone())),
+                    ]
+                }
                 Instruction::Ret => {
                     vec![
                         Instruction::Mov(Operand::Reg(Register::Rbp), Operand::Reg(Register::Rsp)),
@@ -149,6 +229,57 @@ impl InstructionFixer {
                             Operand::Stack {
                                 size: *rhs_size,
                                 offset: *rhs_offset,
+                            },
+                        ),
+                    ]
+                }
+                Instruction::Binary(
+                    op @ (BinaryOperator::Add
+                    | BinaryOperator::Sub
+                    | BinaryOperator::And
+                    | BinaryOperator::Or
+                    | BinaryOperator::Xor),
+                    Operand::Stack {
+                        size: lhs_size,
+                        offset: lhs_offset,
+                    },
+                    Operand::Data(name),
+                ) => {
+                    vec![
+                        Instruction::Mov(
+                            Operand::Stack {
+                                size: *lhs_size,
+                                offset: *lhs_offset,
+                            },
+                            Operand::Reg(Register::R10d),
+                        ),
+                        Instruction::Binary(
+                            *op,
+                            Operand::Reg(Register::R10d),
+                            Operand::Data(name.clone()),
+                        ),
+                    ]
+                }
+                Instruction::Binary(
+                    op @ (BinaryOperator::Add
+                    | BinaryOperator::Sub
+                    | BinaryOperator::And
+                    | BinaryOperator::Or
+                    | BinaryOperator::Xor),
+                    Operand::Data(name),
+                    Operand::Stack {
+                        size: lhs_size,
+                        offset: lhs_offset,
+                    },
+                ) => {
+                    vec![
+                        Instruction::Mov(Operand::Data(name.clone()), Operand::Reg(Register::R10d)),
+                        Instruction::Binary(
+                            *op,
+                            Operand::Reg(Register::R10d),
+                            Operand::Stack {
+                                size: *lhs_size,
+                                offset: *lhs_offset,
                             },
                         ),
                     ]

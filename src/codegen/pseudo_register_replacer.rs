@@ -1,22 +1,20 @@
+use crate::sema;
+
 use super::{FunctionDefinition, Operand};
 use std::collections::HashMap;
 
-pub struct PseudoRegisterReplacer {
+pub struct PseudoRegisterReplacer<'a> {
     offset: i32,
     operands: HashMap<String, Operand>,
+    sema: &'a sema::Sema,
 }
 
-impl Default for PseudoRegisterReplacer {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl PseudoRegisterReplacer {
-    pub fn new() -> Self {
+impl<'a> PseudoRegisterReplacer<'a> {
+    pub fn new(sema: &'a sema::Sema) -> Self {
         Self {
             offset: 0,
             operands: HashMap::new(),
+            sema,
         }
     }
 
@@ -47,7 +45,17 @@ impl PseudoRegisterReplacer {
                 if let Operand::PseudoReg(id) = operand
                     && !self.operands.contains_key(id)
                 {
-                    self.add_pseudo_register(id);
+                    if let Some(sym) = self.sema.symtab.get(id) {
+                        match sym.linkage {
+                            sema::Linkage::Internal | sema::Linkage::External => {
+                                self.operands
+                                    .insert(id.to_string(), Operand::Data(id.to_string()));
+                            }
+                            sema::Linkage::None => self.add_pseudo_register(id),
+                        }
+                    } else {
+                        self.add_pseudo_register(id);
+                    }
                 }
             }
         }

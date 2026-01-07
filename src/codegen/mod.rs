@@ -6,7 +6,7 @@ mod x86_emitter;
 
 pub use domain::{
     BinaryOperator, ConditionCode, FunctionDefinition, Instruction, Operand, Program, Register,
-    UnaryOperator,
+    StaticVariable, UnaryOperator,
 };
 pub use error::X86EmitterError;
 pub use instruction_fixer::InstructionFixer;

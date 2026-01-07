@@ -103,6 +103,13 @@ pub enum SemaError {
         span: SourceSpan,
     },
 
+    #[diagnostic(code(sema::invalid_storage_class_in_for_loop))]
+    #[error("'extern' and 'static' aren't allowed in 'for' loop declarations")]
+    InvalidStorageClassInForLoop {
+        #[label]
+        span: SourceSpan,
+    },
+
     #[diagnostic(code(sema::invalid_redeclaration))]
     #[error("Conflicting types for '{name}'")]
     InvalidRedeclaration {
@@ -133,6 +140,13 @@ pub enum SemaError {
     BinaryExpressionTypeMismatch {
         lhs_ty: parser::Type,
         rhs_ty: parser::Type,
+        #[label]
+        span: SourceSpan,
+    },
+
+    #[diagnostic(code(sema::invalid_initializer))]
+    #[error("Invalid initializer")]
+    InvalidInitializer {
         #[label]
         span: SourceSpan,
     },

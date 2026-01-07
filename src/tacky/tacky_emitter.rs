@@ -1,7 +1,9 @@
 use std::collections::VecDeque;
 
-use super::{BinaryOperator, FunctionDefinition, Instruction, Program, TackyError, Value};
-use crate::{parser, sema};
+use super::{BinaryOperator, Decl, FunctionDefinition, Instruction, Program, TackyError, Value};
+use crate::parser;
+use crate::sema;
+use crate::tacky::domain::StaticVariable;
 
 #[derive(Debug, Clone)]
 struct CaseInfo<'a> {
@@ -19,6 +21,7 @@ pub struct TackyEmitter<'a> {
     function: Option<FunctionDefinition<'a>>,
     instructions: Vec<Instruction>,
     counter: usize,
+    sema: &'a sema::Sema,
 
     break_labels: Vec<String>,
     continue_labels: Vec<String>,
@@ -26,19 +29,14 @@ pub struct TackyEmitter<'a> {
     default_info: Vec<DefaultInfo>,
 }
 
-impl Default for TackyEmitter<'_> {
-    fn default() -> Self {
-        TackyEmitter::new()
-    }
-}
-
 impl<'a> TackyEmitter<'a> {
-    pub fn new() -> Self {
+    pub fn new(sema: &'a sema::Sema) -> Self {
         TackyEmitter {
             program: None,
             function: None,
             instructions: Vec::new(),
             counter: 0,
+            sema,
 
             break_labels: Vec::new(),
             continue_labels: Vec::new(),
@@ -64,22 +62,65 @@ impl<'a> TackyEmitter<'a> {
     }
 
     pub fn visit_program(&mut self, program: &'a parser::Program) -> Result<(), TackyError> {
-        let mut functions = Vec::new();
+        let mut decls = Vec::new();
 
         for decl in &program.decls {
-            self.visit_decl(decl)?;
-            if let Some(function) = self.function.take() {
-                functions.push(function);
+            if matches!(decl.kind, parser::DeclKind::FunDecl { .. }) {
+                // TODO: we could maybe preserve the original idea, where the program only takes function definitions.
+                // This is because we pass globals into the program as well
+                self.visit_decl(decl)?;
+                if let Some(function) = self.function.take() {
+                    decls.push(Decl::Function(function));
+                }
             }
         }
 
-        self.program = Some(Program { functions });
+        let mut globals = Vec::new();
+        for (name, sym) in self.sema.symtab.symbols() {
+            let linkage = sym.linkage;
+
+            match sym.init {
+                sema::InitValue::Const(i) => globals.push(StaticVariable {
+                    name: name.clone(),
+                    value: i,
+                    linkage,
+                    is_tentative: false,
+                }),
+                sema::InitValue::Tentative => globals.push(StaticVariable {
+                    name: name.clone(),
+                    value: 0,
+                    linkage,
+                    is_tentative: true,
+                }),
+                sema::InitValue::None => {
+                    // Only skip extern declarations (external linkage)
+                    // Static locals (internal linkage) should create definitions
+                    if matches!(linkage, sema::Linkage::External) {
+                        continue;
+                    } else {
+                        globals.push(StaticVariable {
+                            name: name.clone(),
+                            value: 0,
+                            linkage,
+                            is_tentative: false,
+                        });
+                    }
+                }
+                _ => continue,
+            }
+        }
+
+        self.program = Some(Program { decls, globals });
         Ok(())
     }
 
     fn visit_decl(&mut self, decl: &'a parser::Decl) -> Result<(), TackyError> {
         match &decl.kind {
             parser::DeclKind::VarDecl { name, initializer } => {
+                // Skip local static declarations
+                if matches!(decl.storage, Some(parser::StorageClass::Static)) {
+                    return Ok(());
+                }
                 if let Some(initializer) = &initializer {
                     let expr = self.visit_expr(initializer)?;
                     self.instructions
@@ -119,6 +160,7 @@ impl<'a> TackyEmitter<'a> {
                     self.function = Some(FunctionDefinition {
                         name,
                         params: tacky_params,
+                        is_global: matches!(decl.storage, Some(parser::StorageClass::Extern)),
                         body: self.instructions.drain(..).collect(),
                     });
                 }
